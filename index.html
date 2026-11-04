@@ -1386,7 +1386,16 @@
     fillSelect(selQ, o, -1, 3);
   }
   function buildAudio(hh) {
-    fillSelect(selA, hh.audioTracks.map((t, i) => [String(i), 'Audio: ' + (t.name || t.lang || (i + 1))]), hh.audioTrack, 2);
+    const tracks = hh.audioTracks || [];
+    if (tracks.length < 2) {
+      selA.textContent = '';
+      selA.hidden = true;
+      return;
+    }
+    const options = [['-1', 'Audio: Auto']].concat(
+      tracks.map((t, i) => [String(i), t.name || t.lang || ('Track ' + (i + 1))])
+    );
+    fillSelect(selA, options, hh.audioTrack == null ? -1 : hh.audioTrack, 2);
   }
   function buildSubs(hh) {
     fillSelect(selS, [['-1', 'Subtitles: off']].concat(hh.subtitleTracks.map((t, i) => [String(i), 'Sub: ' + (t.name || t.lang || (i + 1))])), hh.subtitleTrack, 2);

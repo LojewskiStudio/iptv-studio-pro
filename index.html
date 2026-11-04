@@ -1,0 +1,1770 @@
+<!DOCTYPE html>
+<!--
+  IPTV Studio Player Pro (ver.01)
+  Single-file HLS/IPTV player. Open it in a browser tab - no server needed.
+
+  - Multiple M3U/M3U8 playlists (URL or local file), cached in IndexedDB
+  - Country / category extraction that you can configure per playlist
+  - Favorites, recent channels, playback history (Back / Forward), zapping
+  - Automatic fallback between streams of the same channel (same tvg-id)
+  - Quality, audio track and subtitle selection, stream statistics
+  - Keyboard navigation: arrows move a cursor, Enter plays
+
+  Requires hls.js (loaded from a CDN) for browsers without native HLS.
+
+  IPTV Studio Pro
+      Copyright (c) 2026 Lojewski Studio
+      SPDX-License-Identifier: MIT
+      
+  Licensed under the MIT License. See the LICENSE file in the repository root.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Single-file IPTV player: HLS, multiple playlists, favorites, no server required.">
+<title>IPTV Studio Player</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<style>
+  :root {
+    --accent: #ff8400;
+    --bg: #050505;
+    --panel: #121212;
+    --panel2: #161616;
+    --item: #181818;
+    --item-h: #2a2a2a;
+    --line: #262626;
+    --muted: #8d8d8d;
+    --sig:#ca6f92;
+    --fs: 14px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; display: flex; height: 100vh; overflow: hidden;
+    background: #000; color: #fff;
+    font: var(--fs)/1.35 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+
+  /* ---------- Player column ---------- */
+  .left {
+    flex: 1; min-width: 0; display: flex; padding: 14px;
+    background: var(--bg); overflow-y: auto;
+  }
+  .player { position: relative; margin: auto; width: 100%; max-width: 950px; }
+  .video-box { position: relative; background: #000; }
+  video {
+    display: block; width: 100%; aspect-ratio: 16 / 9;
+    max-height: calc(100vh - 200px); background: #000; outline: 0; border-radius: 3px;
+  }
+  .video-box:fullscreen { width: 100vw; height: 100vh; }
+  .video-box:fullscreen video { width: 100%; height: 100%; max-height: none; aspect-ratio: auto; border-radius: 0; }
+
+  /* Overlay: only visible when the player box itself is fullscreen */
+  .overlay {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: none;
+    justify-content: space-between; align-items: flex-start; gap: 12px;
+    padding: 20px 24px; pointer-events: none;
+  }
+  .video-box.fs .overlay { display: flex; }
+  .ov-name {
+    font-size: 1.7em; font-weight: 700; text-shadow: 0 1px 8px #000, 0 0 2px #000;
+    opacity: 0; transition: opacity .4s;
+  }
+  .ov-name.show { opacity: 1; }
+  .ov-status { font-size: 1.1em; }
+
+  /* ---------- Toolbar under the player ---------- */
+  .toolbar { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .group { display: flex; gap: 4px; }
+  .control-spacer { flex: 1 1 auto; }
+  .btn, select, .btn-label {
+    background: #262626; color: #fff; border: 1px solid #333; border-radius: 3px;
+    padding: 1px 11px; font: inherit; font-size: .80em; cursor: pointer;
+  }
+  .btn:hover:not(:disabled), .btn-label:hover { background: #343434; color: var(--accent); border-color: #444; }
+  .btn:disabled { opacity: .38; cursor: not-allowed; }
+  .btn.on { color: #ffc400; border-color: #5a4700; }
+  .btn:focus-visible, select:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  select { max-width: 200px; }
+
+  .info { min-height: 44px; margin-bottom: 10px; flex-wrap: wrap; }
+  .nowlogo { width: 50px; height: 50px; object-fit: contain; background: #111; border-radius: 4px; flex: none; }
+  .now-text { min-width: 0; flex: 1 1 240px; }
+  .now-name { font-size: 1.3em; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .now-meta { color: var(--muted); font-size: .85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .details { margin-left: auto; color: var(--muted); font-size: .85em; text-align: right; white-space: nowrap; }
+  .note { color: #ffcc66; font-size: .85em; }
+  .status {
+    padding: 3px 10px; border-radius: 999px; font-size: .85em; font-weight: 600;
+    white-space: nowrap; background: #2a2a2a; color: #ccc;
+  }
+  .status.loading { background: #3d3000; color: #ffd24d; }
+  .status.error   { background: #451414; color: #ff6b6b; }
+  .status.geo     { background: #3a1d49; color: #d9a3ff; }
+  .status.warning { background: #3d3000; color: #ffcc66; }
+  .status.loading::before {
+    content: ""; display: inline-block; width: .7em; height: .7em; margin-right: .5em;
+    border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%;
+    animation: spin .8s linear infinite; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .stats {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 18px;
+    margin: 0; padding: 8px 12px; background: #0d0d0d; border: 1px solid var(--line); border-radius: 6px;
+    font: 10px/1.45 ui-monospace, Consolas, monospace;
+    position: absolute; z-index: 8; top: calc(100% + 8px); left: 0; right: 0;
+    max-height: min(22vh, 180px); overflow: auto; box-shadow: 0 6px 20px #000b;
+  }
+  .stats-row { display: grid; grid-template-columns: minmax(90px, .8fr) minmax(0, 1.2fr); gap: 8px; min-width: 0; }
+  .stats-key { color: var(--muted); }
+  .stats-value { color: #7799bb; overflow-wrap: anywhere; }
+
+  /* ---------- Right panel ---------- */
+  .right {
+    width: clamp(300px, 24vw, 420px); display: flex; flex-direction: column;
+    background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
+  }
+  .right-header { padding: 14px; background: var(--panel2); display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--line); }
+  .title-row { display: flex; align-items: center; justify-content: space-between; }
+  .signature { margin-top: -16px; color: var(--sig); font-size: .70em; letter-spacing: .02em; }
+  h1 { margin: 0; font-size: 1.45em; color: var(--accent); text-shadow: 0 0 16px #ff840073; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 5px; }
+  .tab {
+    padding: 6px 9px; border: 0; border-radius: 6px; font: inherit; font-size: .72em;
+    background: #262626; color: #ccc; cursor: pointer; transition: .15s;
+  }
+  .tab:hover { background: #343434; color: var(--accent); }
+  .tab.active { background: var(--accent); color: #131313; font-weight: 700; }
+  #search, .dlg input[type=text], .dlg input[type=url] {
+    width: 100%; padding: 8px; border: 1px solid #333; border-radius: 5px;
+    font: inherit; font-size: .70em; background: #1a1a1a; color: #fff; outline: 0;
+  }
+  #search:focus, .dlg input[type=text]:focus, .dlg input[type=url]:focus { border-color: var(--accent); }
+  .count { color: var(--muted); font-size: .8em; }
+
+  #channel-list {
+    flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 10px; list-style: none;
+    scrollbar-width: thin; scrollbar-color: var(--accent) #1a1a1a;
+  }
+  li.row {
+    display: flex; align-items: center; gap: 10px; padding: 7px 10px; margin-bottom: 4px;
+    border-radius: 6px; background: var(--item); cursor: pointer; transition: background .12s; outline: 0;
+  }
+  li.row:hover { background: var(--item-h); }
+  li.row:focus { background: var(--item-h); box-shadow: inset 0 0 0 2px var(--accent); }
+  li.row.active { box-shadow: inset 3px 0 0 #00bfff; color: #00bfff; font-weight: 700; background: #232d33; }
+  li.row.active:focus { box-shadow: inset 3px 0 0 #00bfff, inset 0 0 0 2px var(--accent); }
+  li.row.dead { opacity: .45; }
+  li.group { justify-content: space-between; font-weight: 700; background: #222; color: #ddd; }
+  li.group.open { color: var(--accent); }
+  li.msg { display: block; background: none; cursor: default; color: var(--muted); text-align: center; white-space: pre-line; }
+  .cnt { color: var(--muted); font-weight: 400; font-size: .85em; }
+  .logo {
+    width: 34px; height: 34px; flex: none; background: #101010; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .txt { flex: 1; min-width: 0; }
+  .name, .sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { color: var(--muted); font-weight: 400; font-size: .8em; }
+  .badge { font-size: .7em; border-radius: 4px; padding: 1px 5px; margin-left: 6px; font-weight: 600; vertical-align: 1px; }
+  .badge.geo { background: #3a1d49; color: #d9a3ff; }
+  .badge.multi { background: #1d3a49; color: #8fd3ff; }
+  .star { background: none; border: 0; color: #666; font-size: 1.25em; cursor: pointer; padding: 0 4px; line-height: 1; }
+  .star:hover, .star.on { color: #ffc400; }
+
+  /* ---------- Settings dialog ---------- */
+  dialog { background: #1a1a1a; color: #fff; border: 1px solid #333; border-radius: 10px; padding: 0; width: min(720px, 94vw); }
+  dialog::backdrop { background: rgba(0,0,0,.7); }
+  .dlg { padding: 18px 22px; max-height: 88vh; overflow-y: auto; }
+  .dlg-head { display: flex; justify-content: space-between; align-items: center; }
+  .dlg h2 { margin: 0; color: var(--accent); }
+  .dlg h3 { margin: 20px 0 8px; font-size: 1em; color: #ddd; border-bottom: 1px solid #333; padding-bottom: 4px; }
+  .pl-item { display: flex; gap: 10px; align-items: center; padding: 8px 10px; background: #232323; border-radius: 6px; margin-bottom: 6px; }
+  .pl-item input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+  .pl-info { flex: 1; min-width: 0; }
+  .pl-info b { display: block; }
+  .pl-info small { display: block; color: var(--muted); word-break: break-all; }
+  .pl-info .err { color: #ff8a8a; }
+  .pl-info .warn { color: #ffcc66; }
+  .add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+  .add input[type=text], .add input[type=url] { flex: 1; min-width: 150px; width: auto; }
+  .hint { color: var(--muted); font-size: .85em; margin: 6px 0 0; }
+  .opt { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
+  .opt input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .opt input[type=number] { width: 90px; padding: 6px 8px; color: #fff; background: #262626; border: 1px solid #444; border-radius: 5px; font: inherit; }
+  .meta { margin: -2px 0 10px 26px; padding: 12px; background: #1f1f1f; border: 1px solid #2f2f2f; border-radius: 6px; }
+  .mrow { display: grid; grid-template-columns: 150px 1fr; gap: 4px 10px; align-items: center; margin-bottom: 8px; }
+  .mrow > span { color: #ccc; }
+  .mrow small { grid-column: 2; color: var(--muted); }
+  .mrow .inline { display: flex; gap: 6px; }
+  .mrow .inline > * { flex: 1; min-width: 0; }
+  pre.inspect {
+    margin: 8px 0 0; padding: 8px 10px; background: #0d0d0d; border: 1px solid var(--line); border-radius: 6px;
+    color: #b9d7ff; font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
+  }
+  .kbd { display: grid; grid-template-columns: 150px 1fr; gap: 5px 14px; font-size: .92em; }
+  kbd { background: #333; border: 1px solid #444; border-radius: 4px; padding: 1px 7px; font: 12px ui-monospace, Consolas, monospace; }
+
+  @media (max-width: 800px) {
+    body { flex-direction: column; height: auto; overflow: auto; }
+    .left { padding: 10px; overflow: visible; }
+    .player { margin: 0 auto; }
+    .stats { position: static; max-height: min(30vh, 180px); box-shadow: none; }
+    video { max-height: none; }
+    .right { width: 100%; height: 75vh; border-left: 0; }
+    .mrow { grid-template-columns: 1fr; }
+    .mrow small { grid-column: 1; }
+  }
+  @media (max-width: 520px) {
+    .stats { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<div class="left">
+  <div class="player">
+    <!-- Current station information sits above the video. -->
+    <div class="row info">
+      <img class="nowlogo" id="now-logo" alt="" hidden>
+      <div class="now-text">
+        <div class="now-name" id="now-name">Select a channel</div>
+        <div class="now-meta" id="now-meta"></div>
+      </div>
+      <span class="status" id="status" hidden></span>
+      <span class="note" id="note" hidden></span>
+      <span class="details" id="details"></span>
+    </div>
+
+    <div class="video-box" id="video-box">
+      <video id="video" playsinline></video>
+      <div class="overlay" id="overlay">
+        <div class="ov-name" id="ov-name"></div>
+        <div class="ov-status" id="ov-status"></div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <!-- Row 1: all buttons -->
+      <div class="row controls">
+        <div class="group">
+          <button class="btn" id="btn-prev" title="Previous channel in the list (P)">▲ Prev</button>
+          <button class="btn" id="btn-next" title="Next channel in the list (N)">▼ Next</button>
+        </div>
+        <div class="group">
+          <button class="btn" id="btn-back" title="Back to the previously played channel ( , )" disabled>↶ Back</button>
+          <button class="btn" id="btn-fwd" title="Forward in history ( . )" disabled>Forward ↷</button>
+        </div>
+        <select id="sel-stream" title="Stream source" hidden></select>
+        <select id="sel-quality" title="Quality" hidden></select>
+        <select id="sel-audio" title="Audio track" hidden></select>
+        <select id="sel-subs" title="Subtitles" hidden></select>
+        <span class="control-spacer"></span>
+        <button class="btn" id="btn-fs" title="Fullscreen with status overlay (F)" hidden>⛶</button>
+        <button class="btn" id="btn-stats" title="Stream statistics (I)">ℹ Stats</button>
+        <button class="btn" id="btn-fav" title="Add to favorites (S)">☆ Favorite</button>
+      </div>
+
+      <pre class="stats" id="stats" hidden></pre>
+    </div>
+  </div>
+</div>
+
+<div class="right">
+  <div class="right-header">
+    <div class="title-row">
+      <h1>IPTV Studio Pro 📺 </h1>
+      <button class="btn" id="btn-settings" title="Settings">⚙</button>
+    </div>
+    <div class="signature">IPTV Player Ver.01 / Lojewski Studio - 2026</div>
+    <div class="tabs" id="tabs">
+      <button class="tab" data-view="fav">★ FAVORITES<span id="fav-count"></span></button>
+      <button class="tab" data-view="recent">RECENT</button>
+      <button class="tab" data-view="country">COUNTRIES</button>
+      <button class="tab" data-view="category">CATEGORIES</button>
+      <button class="tab" data-view="all">ALL</button>
+    </div>
+    <input type="text" id="search" placeholder="Search name, country, category…  ( / )" autocomplete="off">
+    <div class="count" id="count"></div>
+  </div>
+  <ul id="channel-list"></ul>
+</div>
+
+<dialog id="settings">
+  <div class="dlg">
+    <div class="dlg-head">
+      <h2>⚙ Settings</h2>
+      <button class="btn" id="dlg-close">✕</button>
+    </div>
+
+    <h3>Playlists</h3>
+    <div id="pl-list"></div>
+    <div class="add">
+      <input type="text" id="pl-name" placeholder="Name (optional)">
+      <input type="url" id="pl-url" placeholder="https://…/playlist.m3u8">
+      <button class="btn" id="pl-add">Add</button>
+    </div>
+    <div class="add">
+      <label class="btn-label">Load from file…
+        <input type="file" id="pl-file" accept=".m3u,.m3u8,.txt" hidden>
+      </label>
+      <button class="btn" id="pl-refresh">⟳ Refresh all</button>
+    </div>
+    <p class="hint" id="pl-msg"></p>
+    <p class="hint">
+      A playlist URL only loads if its server allows cross-origin requests (CORS). GitHub and GitHub Pages do.
+      If a URL fails, download the file and use “Load from file”. Use the <b>Metadata</b> button of a playlist
+      to control how countries and categories are read from it.
+    </p>
+
+    <h3>Options</h3>
+    <label class="opt">Duplicate channels:
+      <select id="opt-merge">
+        <option value="off">Keep every entry separate</option>
+        <option value="id">Merge entries with the same tvg-id (backup streams)</option>
+      </select>
+    </label>
+    <label class="opt"><input type="checkbox" id="opt-hideDead"> Hide channels that failed to start (retried after 7 days)</label>
+    <label class="opt"><input type="checkbox" id="opt-hideGeo"> Hide channels marked “Geo-blocked”</label>
+    <label class="opt"><input type="checkbox" id="opt-autoSkip"> When a channel fails, jump to the next one automatically</label>
+    <label class="opt"><input type="checkbox" id="opt-autoResume"> Resume the last channel on start</label>
+    <label class="opt" for="opt-history-max">Playback history limit:
+      <input type="number" id="opt-history-max" min="1" max="1000" step="1" inputmode="numeric">
+      <span>channels</span>
+    </label>
+    <label class="opt">Fullscreen:
+      <select id="opt-fs">
+        <option value="native">Native button (video only, no status overlay)</option>
+        <option value="app">App fullscreen (status overlay, ↑/↓ zap) - Chrome/Edge</option>
+      </select>
+    </label>
+    <label class="opt">Text size:
+      <select id="opt-font">
+        <option value="s">Small</option>
+        <option value="m">Medium</option>
+        <option value="l">Large (TV / tablet)</option>
+      </select>
+    </label>
+
+    <h3>Data</h3>
+    <div class="add">
+      <button class="btn" id="btn-export">Export favorites (.m3u)</button>
+      <button class="btn" id="btn-reset-dead">Reset failed channels (<span id="dead-count">0</span>)</button>
+      <button class="btn" id="btn-clear-recent">Clear recent</button>
+    </div>
+
+    <h3>Keyboard shortcuts</h3>
+    <div class="kbd">
+      <span><kbd>↑</kbd> <kbd>↓</kbd></span><span>move the cursor in the list (does not play)</span>
+      <span><kbd>→</kbd> <kbd>←</kbd></span><span>open / close the group under the cursor</span>
+      <span><kbd>Enter</kbd></span><span>play the channel / open or close the group</span>
+      <span><kbd>Home</kbd> <kbd>End</kbd></span><span>first / last item</span>
+      <span><kbd>N</kbd> <kbd>P</kbd></span><span>next / previous channel (zap)</span>
+      <span><kbd>,</kbd> <kbd>.</kbd></span><span>history back / forward</span>
+      <span><kbd>S</kbd></span><span>favorite the channel under the cursor (or the playing one)</span>
+      <span><kbd>M</kbd></span><span>mute</span>
+      <span><kbd>I</kbd></span><span>stream statistics</span>
+      <span><kbd>F</kbd></span><span>fullscreen</span>
+      <span><kbd>/</kbd></span><span>search (↓ jumps to the results, Esc clears)</span>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  'use strict';
+
+  /* =====================================================================
+     Constants and defaults
+     ===================================================================== */
+  const APP = 'IPTV Studio';
+  const TTL = 12 * 3600 * 1000;          // playlist cache lifetime
+  const DEAD_TTL = 7 * 86400 * 1000;     // failed channels are retried after a week
+  const START_TIMEOUT = 18000;           // ms to wait for a stream to start
+  const CHUNK = 250;                     // rows rendered per batch
+  const HISTORY_DEFAULT = 100;
+  const HISTORY_MIN = 1;
+  const HISTORY_LIMIT = 1000;
+
+  const BUILTINS = [
+    {
+      id: 'iptv-org', name: 'IPTV-Org', type: 'url', enabled: true, builtin: true,
+      url: 'https://iptv-org.github.io/iptv/index.m3u',
+      // Companion playlists whose group-title carries the country / category (joined by stream URL)
+      countryIndex: 'https://iptv-org.github.io/iptv/index.country.m3u',
+      categoryIndex: 'https://iptv-org.github.io/iptv/index.category.m3u'
+    },
+    {
+      id: 'free-tv', name: 'Free-TV', type: 'url', enabled: true, builtin: true,
+      url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8'
+    }
+  ];
+  const DEFAULT_META = {
+    countrySource: 'auto', countryAttr: '', fixedCountry: '',
+    categorySource: 'auto', categoryAttr: ''
+  };
+
+  /* =====================================================================
+     Logger (console output filtered by level)
+     ===================================================================== */
+  const LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+  const LOG_LEVEL = 'INFO';
+  const Logger = (() => {
+    const min = LEVELS[LOG_LEVEL];
+    const make = (lv, fn) => (cat, msg, data) => {
+      if (LEVELS[lv] < min) return;
+      const p = '[' + APP + '] [' + new Date().toLocaleTimeString() + '] [' + cat + ']';
+      data === undefined ? fn(p, msg) : fn(p, msg, data);
+    };
+    return {
+      debug: make('DEBUG', console.debug.bind(console)),
+      info: make('INFO', console.log.bind(console)),
+      warn: make('WARN', console.warn.bind(console)),
+      error: make('ERROR', console.error.bind(console))
+    };
+  })();
+
+  /* =====================================================================
+     Small utilities
+     ===================================================================== */
+  const $ = id => document.getElementById(id);
+  const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
+  const uniq = (arr, v) => { if (v && !arr.includes(v)) arr.push(v); };
+
+  /** Tiny DOM builder: h('div', {class:'x', onclick:fn}, child, child…) */
+  function h(tag, props, ...kids) {
+    const e = document.createElement(tag), post = {};
+    if (props) for (const k in props) {
+      const v = props[k];
+      if (v == null || v === false) continue;
+      if (k === 'class') e.className = v;
+      else if (k === 'text') e.textContent = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+      else if (k === 'value' || k === 'checked') post[k] = v;
+      else e.setAttribute(k, v === true ? '' : v);
+    }
+    for (const c of kids.flat()) if (c != null && c !== false) e.append(c);
+    for (const k in post) e[k] = post[k];
+    return e;
+  }
+
+  const store = {
+    get(k, d) {
+      try { const v = localStorage.getItem('iptv.' + k); return v == null ? d : JSON.parse(v); }
+      catch (_) { return d; }
+    },
+    set(k, v) { try { localStorage.setItem('iptv.' + k, JSON.stringify(v)); } catch (_) {} }
+  };
+
+  // IndexedDB key-value store (playlist cache) with an in-memory fallback
+  const mem = new Map();
+  let dbPromise = null;
+  const openDb = () => dbPromise || (dbPromise = new Promise((res, rej) => {
+    const r = indexedDB.open('iptv-player', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }));
+  async function idbGet(k) {
+    if (mem.has(k)) return mem.get(k);
+    try {
+      const d = await openDb();
+      return await new Promise((res, rej) => {
+        const q = d.transaction('kv').objectStore('kv').get(k);
+        q.onsuccess = () => res(q.result);
+        q.onerror = () => rej(q.error);
+      });
+    } catch (_) { return undefined; }
+  }
+  async function idbSet(k, v) {
+    mem.set(k, v);
+    try {
+      const d = await openDb();
+      await new Promise((res, rej) => {
+        const t = d.transaction('kv', 'readwrite');
+        t.objectStore('kv').put(v, k);
+        t.oncomplete = res; t.onerror = () => rej(t.error);
+      });
+    } catch (_) {}
+  }
+  async function idbDel(k) {
+    mem.delete(k);
+    try {
+      const d = await openDb();
+      await new Promise((res, rej) => {
+        const t = d.transaction('kv', 'readwrite');
+        t.objectStore('kv').delete(k);
+        t.oncomplete = res; t.onerror = () => rej(t.error);
+      });
+    } catch (_) {}
+  }
+
+  function ago(ts) {
+    const m = Math.round((Date.now() - ts) / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return m + ' min ago';
+    const hrs = Math.round(m / 60);
+    return hrs < 48 ? hrs + ' h ago' : Math.round(hrs / 24) + ' days ago';
+  }
+
+  /* =====================================================================
+     Countries: names, codes, aliases
+     ===================================================================== */
+  const countryNames = new Map();   // 'US' -> 'United States'
+  const countryCodes = new Map();   // 'united states' -> 'US'
+  try {
+    const dn = new Intl.DisplayNames(['en'], { type: 'region' });
+    for (let a = 65; a <= 90; a++) for (let b = 65; b <= 90; b++) {
+      const code = String.fromCharCode(a, b);
+      let name;
+      try { name = dn.of(code); } catch (_) { continue; }
+      if (name && name !== code) { countryNames.set(code, name); countryCodes.set(norm(name), code); }
+    }
+  } catch (_) {}
+  ['USA|US', 'UK|GB', 'England|GB', 'Scotland|GB', 'South Korea|KR', 'North Korea|KP', 'Russia|RU',
+   'Iran|IR', 'Syria|SY', 'Vietnam|VN', 'Taiwan|TW', 'Ivory Coast|CI', 'Czech Republic|CZ', 'Moldova|MD',
+   'Tanzania|TZ', 'Venezuela|VE', 'Bolivia|BO', 'Macedonia|MK', 'North Macedonia|MK', 'Turkiye|TR',
+   'Palestine|PS', 'Laos|LA', 'Brunei|BN', 'Cape Verde|CV', 'Swaziland|SZ', 'Congo|CG', 'DR Congo|CD',
+   'Hong Kong|HK', 'Macau|MO', 'Kosovo|XK'
+  ].forEach(x => { const p = x.split('|'); countryCodes.set(norm(p[0]), p[1]); });
+  const _extra = { XK: 'Kosovo' };
+  for (const k in _extra) if (!countryNames.has(k)) countryNames.set(k, _extra[k]);
+
+  function toCountry(v) {
+    v = String(v || '').trim();
+    if (!v) return '';
+    if (/^[a-z]{2}$/i.test(v)) {
+      let c = v.toUpperCase(); if (c === 'UK') c = 'GB';
+      return countryNames.get(c) || c;
+    }
+    const code = countryCodes.get(norm(v));
+    return code ? (countryNames.get(code) || v) : v;
+  }
+  function looksLikeCountry(v) {
+    v = String(v || '').trim();
+    if (/^[a-z]{2}$/i.test(v)) { let c = v.toUpperCase(); if (c === 'UK') c = 'GB'; return countryNames.has(c); }
+    return countryCodes.has(norm(v));
+  }
+
+  /* =====================================================================
+     M3U parsing (raw entries only; country/category are resolved later,
+     so changing the metadata settings never needs a re-download)
+     ===================================================================== */
+  const KNOWN_ATTRS = new Set(['tvg-id', 'tvg-logo', 'tvg-country', 'tvg-language', 'group-title']);
+
+  function commaAt(s) {            // first comma that is not inside quotes
+    let q = false;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === '"') q = !q; else if (c === ',' && !q) return i;
+    }
+    return -1;
+  }
+
+  function parseExtinf(line) {
+    const i = commaAt(line);
+    const head = i >= 0 ? line.slice(0, i) : line;
+    const name = i >= 0 ? line.slice(i + 1).trim() : '';
+    const attrs = {};
+    head.replace(/([\w-]+)="([^"]*)"/g, (_, k, v) => { attrs[k.toLowerCase()] = v.trim(); return ''; });
+    const e = {
+      name: name || attrs['tvg-name'] || 'Unnamed channel', url: '',
+      logo: attrs['tvg-logo'] || '', id: attrs['tvg-id'] || '',
+      tc: attrs['tvg-country'] || '', lang: attrs['tvg-language'] || '',
+      group: attrs['group-title'] || attrs['tvg-group'] || attrs['group'] || ''
+    };
+    let extra = null;
+    for (const k in attrs) if (!KNOWN_ATTRS.has(k)) (extra || (extra = {}))[k] = attrs[k];
+    if (extra) e.a = extra;          // every other attribute, so it can be picked in Metadata
+    return e;
+  }
+
+  function parseM3U(text) {
+    const out = [];
+    let cur = null, grp = '';
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.startsWith('#EXTINF')) {
+        cur = parseExtinf(line);
+        if (!cur.group && grp) cur.group = grp;
+      } else if (line.startsWith('#EXTGRP:')) {       // VLC-style group line
+        grp = line.slice(8).trim();
+        if (cur && !cur.group) cur.group = grp;
+      } else if (line[0] === '#') {
+        /* other tags are ignored */
+      } else if (/^https?:\/\//i.test(line)) {
+        const e = cur || { name: 'Unnamed channel', url: '', logo: '', id: '', tc: '', lang: '', group: grp };
+        e.url = line; out.push(e); cur = null; grp = '';
+      }
+    }
+    return out;
+  }
+
+  /* =====================================================================
+     Metadata resolution: country + categories for every raw entry
+     ===================================================================== */
+  function splitCountries(v) {
+    v = String(v || '').trim();
+    if (!v) return [];
+    if (/^[A-Za-z]{2}(\s*,\s*[A-Za-z]{2})+$/.test(v)) return v.split(',').map(s => s.trim());   // "US,CA"
+    return v.split(/[;|]/).map(s => s.trim()).filter(Boolean);
+  }
+  const countriesFrom = v => splitCountries(v).map(toCountry).filter(Boolean);
+  const catsFrom = v => String(v || '').split(';').map(s => s.trim()).filter(Boolean);
+  function idCountry(id) {         // "CNN.us@SD" -> United States
+    const m = String(id || '').split('@')[0].match(/\.([a-z]{2})$/i);
+    return m ? [toCountry(m[1])] : [];
+  }
+  function rawAttr(raw, name) {
+    const k = String(name || '').trim().toLowerCase();
+    if (!k) return '';
+    switch (k) {
+      case 'tvg-id': return raw.id;
+      case 'tvg-logo': return raw.logo;
+      case 'tvg-country': return raw.tc;
+      case 'tvg-language': return raw.lang;
+      case 'group-title': return raw.group;
+    }
+    return (raw.a && raw.a[k]) || '';
+  }
+
+  /** Does group-title in this playlist hold countries (Free-TV style) or categories (iptv-org style)? */
+  function analyze(raw) {
+    const seen = new Map();
+    for (const r of raw) for (const g of catsFrom(r.group)) seen.set(g, (seen.get(g) || 0) + 1);
+    let c = 0;
+    for (const g of seen.keys()) if (looksLikeCountry(g)) c++;
+    return { groupCount: seen.size, countryLike: c, groupIsCountry: seen.size > 0 && c / seen.size >= 0.5 };
+  }
+
+  function resolveEntry(raw, p, d) {
+    const m = p.meta || DEFAULT_META;
+    const cs = m.countrySource || 'auto', ks = m.categorySource || 'auto';
+    let countries = [], cats = [];
+
+    if (cs === 'auto') {
+      countries = (d.idx.country && d.idx.country[raw.url]) || [];
+      if (!countries.length) countries = countriesFrom(raw.tc);
+      if (!countries.length && d.info.groupIsCountry) countries = countriesFrom(raw.group);
+      if (!countries.length) countries = idCountry(raw.id);
+    } else if (cs === 'tvg-country') countries = countriesFrom(raw.tc);
+    else if (cs === 'group') countries = countriesFrom(raw.group);
+    else if (cs === 'tvg-id') countries = idCountry(raw.id);
+    else if (cs === 'attr') countries = countriesFrom(rawAttr(raw, m.countryAttr));
+    if (!countries.length && cs !== 'none' && m.fixedCountry && m.fixedCountry.trim()) countries = [toCountry(m.fixedCountry)];
+
+    if (ks === 'auto') {
+      cats = (d.idx.category && d.idx.category[raw.url]) || [];
+      if (!cats.length && !d.info.groupIsCountry) cats = catsFrom(raw.group);
+    } else if (ks === 'group') cats = catsFrom(raw.group);
+    else if (ks === 'attr') cats = catsFrom(rawAttr(raw, m.categoryAttr));
+
+    return {
+      name: raw.name, url: raw.url, logo: raw.logo, id: raw.id, countries, cats,
+      source: p.name, geo: /geo-?blocked/i.test(raw.name)
+    };
+  }
+
+  function buildIndex(text, kind) {    // url -> [values] from a companion playlist
+    const map = {};
+    for (const r of parseM3U(text)) {
+      if (!r.group) continue;
+      const vals = kind === 'country' ? countriesFrom(r.group) : catsFrom(r.group);
+      const a = map[r.url] || (map[r.url] = []);
+      vals.forEach(v => uniq(a, v));
+    }
+    return map;
+  }
+
+  /* =====================================================================
+     State
+     ===================================================================== */
+  let settings = Object.assign(
+    { hideDead: true, hideGeo: false, autoSkip: false, autoResume: true, fontSize: 'm', merge: 'id', fsMode: 'native', historyMax: HISTORY_DEFAULT },
+    store.get('settings', {})
+  );
+  settings.historyMax = Math.max(HISTORY_MIN, Math.min(HISTORY_LIMIT, Math.floor(Number(settings.historyMax) || HISTORY_DEFAULT)));
+
+  let playlists = store.get('playlists', []);
+  for (const def of BUILTINS) {
+    const p = playlists.find(x => x.id === def.id);
+    if (!p) playlists.push({ ...def });
+    else { p.name = def.name; p.builtin = true; for (const k in def) if (p[k] === undefined) p[k] = def[k]; }
+  }
+  playlists.forEach(p => { p.meta = Object.assign({}, DEFAULT_META, p.meta || {}); });
+
+  const plData = {};            // playlist id -> { raw, idx, info, ts }
+  const plStatus = {};          // playlist id -> { n, info, err, warn }
+
+  let channels = [];            // merged channel objects
+  let byUrl = new Map();        // stream url -> channel
+  let favs = [], favUrls = new Set();
+  let recent = [];
+  let dead = store.get('dead', {});
+  for (const k of Object.keys(dead)) if (Date.now() - dead[k].t > DEAD_TTL) delete dead[k];
+
+  let view = store.get('view', 'country');
+  if (!['fav', 'recent', 'country', 'category', 'all'].includes(view)) view = 'country';
+  let query = '';
+  let openGroup = null;
+  let rows = [], rendered = 0;
+  let shown = [];               // channels currently displayed (zap list)
+  let loadToken = 0;
+  let openMeta = null;
+
+  /** Channel shape: { uid, name, logo, id, countries[], cats[], sources[], geo, streams:[{url,source,name,quality,geo}] } */
+  function quality(n) {
+    n = String(n || '').toLowerCase();
+    if (/\b(?:2160p?|4k|uhd)\b/.test(n)) return 2160;
+    const m = n.match(/\b(4320|1440|1080|720|576|540|480|360|240)p?\b/);
+    return m ? +m[1] : 0;
+  }
+  const slim = ch => ({ name: ch.name, logo: ch.logo, id: ch.id, countries: ch.countries, cats: ch.cats, sources: ch.sources, geo: ch.geo, streams: ch.streams });
+  function revive(o) {            // also converts the favorites/recent format of the first version
+    if (!o || typeof o !== 'object') return null;
+    if (Array.isArray(o.streams) && o.streams.length) {
+      const ch = { name: o.name || 'Unnamed channel', logo: o.logo || '', id: o.id || '', countries: o.countries || [], cats: o.cats || [], sources: o.sources || [], geo: !!o.geo, streams: o.streams };
+      ch.uid = ch.streams[0].url;
+      return ch;
+    }
+    if (o.url) {
+      const ch = {
+        name: o.name || 'Unnamed channel', logo: o.logo || '', id: '',
+        countries: o.country && o.country !== 'Fără țară' ? [o.country] : [],
+        cats: (o.cats || []).filter(c => c !== 'Fără categorie'),
+        sources: [o.source || ''], geo: !!o.geo,
+        streams: [{ url: o.url, source: o.source || '', name: o.name || '', quality: 0, geo: !!o.geo }]
+      };
+      ch.uid = o.url;
+      return ch;
+    }
+    return null;
+  }
+  favs = store.get('favs', []).map(revive).filter(Boolean);
+  recent = store.get('recent', []).map(revive).filter(Boolean);
+  const refreshFavUrls = () => { favUrls = new Set(favs.flatMap(f => f.streams.map(s => s.url))); };
+  refreshFavUrls();
+  const isFav = ch => ch.streams.some(s => favUrls.has(s.url));
+
+  const canonId = id => norm(String(id || '').split('@')[0]).trim();
+
+  function buildChannels(entries) {
+    const seen = new Set(), byId = new Map(), out = [];
+    for (const e of entries) {
+      if (!e.url || seen.has(e.url)) continue;       // the same stream URL is never listed twice
+      seen.add(e.url);
+      const stream = { url: e.url, source: e.source, name: e.name, quality: quality(e.name), geo: e.geo };
+      const key = settings.merge === 'id' ? canonId(e.id) : '';   // merge ONLY on identical tvg-id, never on name
+      let ch = key ? byId.get(key) : null;
+      if (!ch) {
+        ch = { name: e.name, logo: e.logo, id: e.id, countries: [], cats: [], sources: [], streams: [] };
+        out.push(ch);
+        if (key) byId.set(key, ch);
+      }
+      if (!ch.logo && e.logo) ch.logo = e.logo;
+      e.countries.forEach(v => uniq(ch.countries, v));
+      e.cats.forEach(v => uniq(ch.cats, v));
+      uniq(ch.sources, e.source);
+      ch.streams.push(stream);
+    }
+    for (const ch of out) {
+      ch.streams.sort((a, b) => (a.geo - b.geo) || (b.quality - a.quality));   // stable: playlist order kept for ties
+      ch.name = ch.streams[0].name;
+      ch.geo = ch.streams.every(s => s.geo);
+      ch.uid = ch.streams[0].url;
+      ch.countries.sort(collator.compare);
+      ch.cats.sort(collator.compare);
+    }
+    return out.sort((a, b) => collator.compare(a.name, b.name));
+  }
+
+  /* =====================================================================
+     DOM references
+     ===================================================================== */
+  const video = $('video'), box = $('video-box'), list = $('channel-list'), searchEl = $('search');
+  const statusEl = $('status'), noteEl = $('note'), detailsEl = $('details'), statsEl = $('stats'), dlg = $('settings');
+  const selStream = $('sel-stream'), selQ = $('sel-quality'), selA = $('sel-audio'), selS = $('sel-subs');
+  const hoverNativeControls = !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches);
+  video.controls = !hoverNativeControls;
+  function handleVideoPointer(e) {
+    if (e.pointerType === 'mouse' || e.pointerType === 'pen' || e.pointerType === 'touch') video.controls = true;
+  }
+  box.addEventListener('pointerenter', handleVideoPointer);
+  box.addEventListener('pointermove', handleVideoPointer);
+  box.addEventListener('pointerdown', handleVideoPointer);
+  box.addEventListener('pointerleave', e => {
+    if (hoverNativeControls && (e.pointerType === 'mouse' || e.pointerType === 'pen')) video.controls = false;
+  });
+  const btnBack = $('btn-back'), btnFwd = $('btn-fwd'), btnFav = $('btn-fav'), btnFs = $('btn-fs');
+
+  /* =====================================================================
+     Playlist loading (cached in IndexedDB)
+     ===================================================================== */
+  const sig = p => [p.url, p.countryIndex || '', p.categoryIndex || ''].join('|');
+
+  async function fetchText(url) {
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.text();
+  }
+
+  async function loadPlaylist(p, force) {
+    const key = 'pl2:' + p.id;
+    const cached = await idbGet(key);
+    const wrap = c => ({ raw: c.raw, idx: c.idx || {}, info: analyze(c.raw), ts: c.ts });
+
+    if (p.type === 'file') {
+      if (cached && cached.raw) { plStatus[p.id] = { n: cached.raw.length, info: 'local file' }; return wrap(cached); }
+      plStatus[p.id] = { err: 'The file is no longer stored. Load it again.' };
+      return plData[p.id] || { raw: [], idx: {}, info: analyze([]) };
+    }
+    if (cached && cached.raw && !force && cached.sig === sig(p) && Date.now() - cached.ts < TTL) {
+      plStatus[p.id] = { n: cached.raw.length, info: 'cached ' + ago(cached.ts) };
+      return wrap(cached);
+    }
+    try {
+      const [mainTxt, cIdx, kIdx] = await Promise.all([
+        fetchText(p.url),
+        p.countryIndex ? fetchText(p.countryIndex).catch(e => ({ fail: e })) : null,
+        p.categoryIndex ? fetchText(p.categoryIndex).catch(e => ({ fail: e })) : null
+      ]);
+      const raw = parseM3U(mainTxt);
+      if (!raw.length) throw new Error('No channels found (is this an M3U playlist?)');
+      const idx = {}, warns = [];
+      if (typeof cIdx === 'string') idx.country = buildIndex(cIdx, 'country'); else if (cIdx) warns.push('country index failed (' + cIdx.fail.message + ')');
+      if (typeof kIdx === 'string') idx.category = buildIndex(kIdx, 'category'); else if (kIdx) warns.push('category index failed (' + kIdx.fail.message + ')');
+      const entry = { ts: Date.now(), sig: sig(p), raw, idx };
+      idbSet(key, entry);
+      plStatus[p.id] = { n: raw.length, info: 'updated just now', warn: warns.join('; ') };
+      Logger.info('PLAYLIST', p.name + ': ' + raw.length + ' entries');
+      return wrap(entry);
+    } catch (err) {
+      const msg = err instanceof TypeError
+        ? 'Cannot download (CORS or server unreachable). Download the file and use “Load from file”.'
+        : err.message;
+      Logger.error('PLAYLIST', p.name + ' failed', err);
+      if (cached && cached.raw) {
+        plStatus[p.id] = { n: cached.raw.length, info: 'old cache (' + ago(cached.ts) + ')', err: msg };
+        return wrap(cached);
+      }
+      plStatus[p.id] = { err: msg };
+      return { raw: [], idx: {}, info: analyze([]) };
+    }
+  }
+
+  async function loadAll(force) {
+    const my = ++loadToken;
+    const active = playlists.filter(p => p.enabled);
+    if (!channels.length) setListMsg(active.length ? 'Loading playlists…' : 'No playlist enabled. Open ⚙ Settings.');
+    await Promise.all(active.map(async p => { plData[p.id] = await loadPlaylist(p, force); }));
+    if (my !== loadToken) return;
+    rebuild();
+    renderPlaylists();
+  }
+  let reloadTimer = null;
+  const reloadSoon = () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(() => loadAll(), 300); };
+
+  /** Re-resolve metadata and re-merge every enabled playlist from the cached raw entries. */
+  function rebuild() {
+    const entries = [];
+    for (const p of playlists) {
+      if (!p.enabled || !plData[p.id]) continue;
+      const d = plData[p.id];
+      for (const raw of d.raw) entries.push(resolveEntry(raw, p, d));
+    }
+    channels = buildChannels(entries);
+    byUrl = new Map();
+    for (const ch of channels) for (const s of ch.streams) byUrl.set(s.url, ch);
+    render();
+    updateCount();
+  }
+
+  /* =====================================================================
+     Channel list: rows, rendering in batches, cursor
+     ===================================================================== */
+  const matches = (ch, q) => !q || (ch._n || (ch._n = norm(ch.name + ' ' + ch.countries.join(' ') + ' ' + ch.cats.join(' ') + ' ' + ch.sources.join(' ')))).includes(q);
+  const isHidden = ch =>
+    (settings.hideGeo && ch.geo) ||
+    (settings.hideDead && dead[ch.uid] && !(cur && cur.uid === ch.uid));
+  const unknownLabel = g => g === 'Unknown country' || g === 'Uncategorized';
+
+  function buildRows() {
+    const q = norm(query.trim());
+    const asRows = (arr, group) => arr.map(ch => ({ t: 'c', ch, group }));
+    shown = [];
+    if (view === 'fav' || view === 'recent') {
+      shown = (view === 'fav' ? favs : recent).filter(c => matches(c, q));
+      return asRows(shown);
+    }
+    const base = channels.filter(c => !isHidden(c));
+    if (view === 'all' || q) {
+      shown = base.filter(c => matches(c, q));
+      return asRows(shown);
+    }
+    const groups = new Map();
+    for (const c of base) {
+      const keys = view === 'country'
+        ? (c.countries.length ? c.countries : ['Unknown country'])
+        : (c.cats.length ? c.cats : ['Uncategorized']);
+      for (const k of keys) { if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
+    }
+    const out = [];
+    const keys = [...groups.keys()].sort((a, b) => (unknownLabel(a) - unknownLabel(b)) || collator.compare(a, b));
+    for (const k of keys) {
+      const arr = groups.get(k), open = openGroup === k;
+      out.push({ t: 'h', g: k, n: arr.length, open });
+      if (open) { shown = arr; out.push(...asRows(arr, k)); }
+    }
+    return out;
+  }
+
+  function setListMsg(text) {
+    list.textContent = '';
+    list.append(h('li', { class: 'msg', text }));
+  }
+  function emptyMessage() {
+    if (view === 'fav') return 'No favorites yet.\nClick ☆ next to a channel, or press S.';
+    if (view === 'recent') return 'No recent channels.';
+    if (query.trim()) return 'No results for “' + query.trim() + '”.';
+    if (!channels.length) {
+      const errs = playlists.filter(p => p.enabled && plStatus[p.id] && plStatus[p.id].err).map(p => p.name + ': ' + plStatus[p.id].err);
+      return errs.length ? errs.join('\n') : 'No channels. Add a playlist in ⚙ Settings.';
+    }
+    return 'Nothing to show.';
+  }
+
+  const findRow = id => list.querySelector('[data-id="' + CSS.escape(id) + '"]');
+  const cursorEl = () => {
+    const a = document.activeElement;
+    return a && a.classList && a.classList.contains('row') && list.contains(a) ? a : null;
+  };
+
+  function render(o = {}) {
+    const c = cursorEl();
+    const keepId = o.focusId !== undefined ? o.focusId : (c ? c.dataset.id : null);
+    rows = buildRows();
+    list.textContent = '';
+    rendered = 0;
+    if (!rows.length) { setListMsg(emptyMessage()); updateCount(); return; }
+    appendRows(CHUNK);
+    if (keepId) {
+      let el = findRow(keepId);
+      while (!el && rendered < rows.length) { appendRows(CHUNK); el = findRow(keepId); }
+      if (el) { el.focus({ preventScroll: true }); el.scrollIntoView({ block: o.scroll === 'start' ? 'start' : 'nearest' }); }
+    }
+    updateCount();
+  }
+
+  function appendRows(n) {
+    const frag = document.createDocumentFragment();
+    const end = Math.min(rows.length, rendered + n);
+    for (; rendered < end; rendered++) frag.appendChild(rowEl(rows[rendered]));
+    list.appendChild(frag);
+  }
+
+  function rowEl(r) {
+    const li = document.createElement('li');
+    li.tabIndex = -1;
+    if (r.t === 'h') {
+      li.className = 'row group' + (r.open ? ' open' : '');
+      li.dataset.id = 'g:' + r.g; li.dataset.group = r.g;
+      li.setAttribute('role', 'button'); li.setAttribute('aria-expanded', String(r.open));
+      li.append(h('span', { text: (r.open ? '▾ ' : '▸ ') + r.g }), h('span', { class: 'cnt', text: r.n }));
+      return li;
+    }
+    const ch = r.ch;
+    li._ch = ch;
+    li.className = 'row channel';
+    li.dataset.id = 'c:' + ch.uid;
+    if (r.group) li.dataset.group = r.group;
+    if (cur && cur.uid === ch.uid) li.classList.add('active');
+    if (dead[ch.uid]) { li.classList.add('dead'); li.title = 'Failed to start (' + (dead[ch.uid].k || 'error') + ')'; }
+
+    const logo = h('div', { class: 'logo' });
+    if (ch.logo) {
+      const img = h('img', { alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' });
+      img.onerror = () => img.remove();
+      img.src = ch.logo;
+      logo.append(img);
+    }
+    const name = h('span', { class: 'name', text: ch.name });
+    if (ch.geo) name.append(h('span', { class: 'badge geo', text: 'GEO' }));
+    if (ch.streams.length > 1) name.append(h('span', { class: 'badge multi', text: '×' + ch.streams.length, title: ch.streams.length + ' streams: ' + ch.sources.join(', ') }));
+    const cats = ch.cats.join(', '), cs = ch.countries.join(', ');
+    const sub = view === 'country' ? cats : view === 'category' ? cs : [cs, cats].filter(Boolean).join(' · ');
+    const on = isFav(ch);
+    li.append(logo, h('div', { class: 'txt' }, name, h('span', { class: 'sub', text: sub })),
+      h('button', { class: 'star' + (on ? ' on' : ''), type: 'button', tabindex: '-1', title: 'Favorite', text: on ? '★' : '☆' }));
+    return li;
+  }
+
+  list.addEventListener('click', e => {
+    const li = e.target.closest('li.row');
+    if (!li) return;
+    if (li.classList.contains('group')) { toggleGroup(li.dataset.group); return; }
+    const ch = li._ch;
+    if (!ch) return;
+    if (e.target.closest('.star')) { toggleFav(ch); li.focus({ preventScroll: true }); }
+    else play(ch);
+  });
+  list.addEventListener('scroll', () => {
+    if (rendered < rows.length && list.scrollTop + list.clientHeight > list.scrollHeight - 600) appendRows(CHUNK);
+  }, { passive: true });
+
+  function toggleGroup(g, open) {
+    const want = open === undefined ? openGroup !== g : open;
+    openGroup = want ? g : null;
+    render({ focusId: 'g:' + g, scroll: want ? 'start' : 'nearest' });
+  }
+
+  function focusRow(el) { if (el) { el.focus({ preventScroll: true }); el.scrollIntoView({ block: 'nearest' }); } }
+  function moveCursor(delta) {
+    let els = [...list.querySelectorAll('li.row')];
+    if (!els.length) return;
+    const c = cursorEl();
+    let i = c ? els.indexOf(c) : (delta > 0 ? -1 : els.length);
+    i += delta;
+    while (i >= els.length && rendered < rows.length) { appendRows(CHUNK); els = [...list.querySelectorAll('li.row')]; }
+    focusRow(els[Math.max(0, Math.min(els.length - 1, i))]);
+  }
+  function jumpCursor(last) {
+    if (last) while (rendered < rows.length) appendRows(CHUNK);
+    const els = list.querySelectorAll('li.row');
+    focusRow(last ? els[els.length - 1] : els[0]);
+  }
+  function revealChannel(ch) {
+    let el = findRow('c:' + ch.uid);
+    while (!el && rendered < rows.length) { appendRows(CHUNK); el = findRow('c:' + ch.uid); }
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  function updateCount() {
+    const act = playlists.filter(p => p.enabled).length;
+    $('count').textContent = channels.length.toLocaleString('en') + ' channels · ' + act + ' playlist' + (act === 1 ? '' : 's');
+    $('fav-count').textContent = favs.length ? ' (' + favs.length + ')' : '';
+  }
+  function markActive() {
+    const old = list.querySelector('li.active');
+    if (old) old.classList.remove('active');
+    if (cur) { const el = findRow('c:' + cur.uid); if (el) el.classList.add('active'); }
+  }
+
+  /* =====================================================================
+     Favorites / recent / history
+     ===================================================================== */
+  function toggleFav(ch) {
+    if (isFav(ch)) {
+      const urls = new Set(ch.streams.map(s => s.url));
+      favs = favs.filter(f => !f.streams.some(s => urls.has(s.url)));
+    } else favs.push(slim(ch));
+    store.set('favs', favs);
+    refreshFavUrls();
+    if (view === 'fav') {
+      const st = list.scrollTop;
+      render();
+      list.scrollTop = st;
+    } else {
+      const el = findRow('c:' + ch.uid);
+      if (el) { const b = el.querySelector('.star'); const on = isFav(ch); b.classList.toggle('on', on); b.textContent = on ? '★' : '☆'; }
+    }
+    updateFavBtn();
+    updateCount();
+  }
+  function updateFavBtn() {
+    const on = !!(cur && isFav(cur));
+    btnFav.textContent = on ? '★ Favorite' : '☆ Favorite';
+    btnFav.classList.toggle('on', on);
+    btnFav.disabled = !cur;
+  }
+  function pushRecent(ch) {
+    recent = [slim(ch), ...recent.filter(r => r.streams[0].url !== ch.uid)].slice(0, 20).map(revive);
+    store.set('recent', recent.map(slim));
+    if (view === 'recent') { const st = list.scrollTop; render({ focusId: null }); list.scrollTop = st; }
+  }
+
+  let hist = [], hIdx = -1;
+  function addHistory(ch, url) {
+    const e = hist[hIdx];
+    if (e && e.ch.uid === ch.uid) e.url = url;
+    else {
+      hist = hist.slice(0, hIdx + 1);
+      hist.push({ ch, url });
+      const limit = settings.historyMax;
+      if (hist.length > limit) {
+        const excess = hist.length - limit;
+        hist.splice(0, excess);
+        hIdx = Math.max(-1, hIdx - excess);
+      }
+      hIdx = hist.length - 1;
+    }
+    updateNav();
+  }
+  function goHistory(d) {
+    const i = hIdx + d;
+    if (i < 0 || i >= hist.length) return;
+    hIdx = i;
+    play(hist[i].ch, { record: false, prefer: hist[i].url });
+    updateNav();
+  }
+  function updateNav() {
+    btnBack.disabled = hIdx <= 0;
+    btnFwd.disabled = hIdx < 0 || hIdx >= hist.length - 1;
+  }
+
+  /* =====================================================================
+     Status, notes, overlay
+     ===================================================================== */
+  let nameTimer = null;
+  const inAppFs = () => document.fullscreenElement === box;
+
+  function setStatus(kind, text, detail) {
+    statusEl.className = 'status ' + (kind || '');
+    statusEl.textContent = text || '';
+    statusEl.title = detail || '';
+    statusEl.hidden = !text;
+    updateOverlay();
+  }
+  function setNote(text) { noteEl.textContent = text || ''; noteEl.hidden = !text; }
+  function updateOverlay() {
+    box.classList.toggle('fs', inAppFs());
+    const ov = $('ov-status');
+    ov.textContent = statusEl.textContent;
+    ov.hidden = !statusEl.textContent;
+    ov.className = 'ov-status status ' + statusEl.className.replace(/^status\s*/, '');
+  }
+  function flashName() {
+    const n = $('ov-name');
+    n.classList.add('show');
+    clearTimeout(nameTimer);
+    nameTimer = setTimeout(() => n.classList.remove('show'), 4000);
+  }
+
+  /* =====================================================================
+     Playback engine (hls.js / native HLS, automatic fallback between streams)
+     ===================================================================== */
+  let hls = null, run = 0, attempt = 0, cur = null, curStream = null;
+  let tried = new Set(), opts = {}, failInfo = { total: 0, geo: 0, last: null };
+  let timer = null, playing = false, runPlayed = false, recordPending = false;
+  let recoveries = 0, netRetries = 0, skipChain = 0, bitrate = 0, ignoreVol = false;
+
+  function teardown() {
+    if (hls) { try { hls.destroy(); } catch (_) {} hls = null; }
+    video.pause();
+    video.removeAttribute('src');
+    try { video.load(); } catch (_) {}
+  }
+
+  function play(ch, o = {}) {
+    if (!ch || !ch.streams || !ch.streams.length) return;
+    run++;
+    cur = ch; opts = o;
+    tried = new Set(); failInfo = { total: 0, geo: 0, last: null };
+    runPlayed = false; recordPending = o.record !== false;
+    if (!o.auto) skipChain = 0;
+    store.set('last', slim(ch));
+
+    $('now-name').textContent = ch.name;
+    $('now-meta').textContent = [ch.countries.join(', '), ch.cats.join(', ')].filter(Boolean).join(' · ');
+    const lg = $('now-logo');
+    if (ch.logo) { lg.hidden = false; lg.referrerPolicy = 'no-referrer'; lg.onerror = () => { lg.hidden = true; }; lg.src = ch.logo; }
+    else lg.hidden = true;
+    $('ov-name').textContent = ch.name + (ch.countries[0] ? ' · ' + ch.countries[0] : '');
+    if (inAppFs()) flashName();
+    document.title = ch.name + ' · ' + APP;
+    setNote('');
+    resetTracks();
+    populateStreamSelect();
+    updateFavBtn();
+    markActive();
+    Logger.info('PLAYER', 'Play: ' + ch.name, { streams: ch.streams.length });
+    nextStream(run);
+  }
+
+  function candidates() {
+    let s = cur.streams;
+    if (opts.force) return s.filter(x => x.url === opts.force);
+    if (opts.prefer) {
+      const i = s.findIndex(x => x.url === opts.prefer);
+      if (i > 0) s = [s[i], ...s.slice(0, i), ...s.slice(i + 1)];
+    }
+    return s;
+  }
+  function nextStream(r) {
+    if (r !== run) return;
+    const next = candidates().find(s => !tried.has(s.url));
+    if (!next) return failAll(r);
+    tried.add(next.url);
+    startStream(r, next);
+  }
+
+  function startStream(r, stream) {
+    const a = ++attempt;
+    if (hoverNativeControls) video.controls = false;
+    curStream = stream; bitrate = 0; playing = false; recoveries = 0; netRetries = 0;
+    clearTimeout(timer);
+    teardown();
+    setStatus('loading', tried.size > 1 ? 'Trying backup stream…' : 'Connecting…');
+    updateDetails();
+    timer = setTimeout(() => { if (r === run && a === attempt && !playing) failStream(r, a, 'timeout', 'No data within ' + START_TIMEOUT / 1000 + ' s'); }, START_TIMEOUT);
+
+    if (window.Hls && Hls.isSupported()) {
+      const hh = new Hls({ enableWorker: true, lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 30 });
+      hls = hh;
+      hh.on(Hls.Events.MANIFEST_PARSED, () => { if (hh !== hls || a !== attempt) return; buildQuality(hh); startPlayback(r, a); });
+      hh.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
+        if (hh !== hls) return;
+        const lv = hh.levels[d.level];
+        if (lv) { bitrate = lv.bitrate || 0; updateDetails(); }
+      });
+      hh.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => { if (hh === hls) buildAudio(hh); });
+      hh.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => { if (hh === hls) buildSubs(hh); });
+      hh.on(Hls.Events.ERROR, (_, d) => {
+        if (hh !== hls || a !== attempt || !d.fatal) return;
+        const code = d.response && d.response.code;
+        Logger.warn('HLS', 'Fatal error: ' + d.details, { code, source: stream.source });
+        if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          if (code === 403 || code === 451) return failStream(r, a, 'geo', 'HTTP ' + code);
+          if (code === 404 || code === 410) return failStream(r, a, 'error', 'HTTP ' + code);
+          if (netRetries++ < 2) { hh.startLoad(); return; }
+          return failStream(r, a, 'error', code ? 'HTTP ' + code : 'Network error, or blocked by CORS');
+        }
+        if (d.type === Hls.ErrorTypes.MEDIA_ERROR && recoveries++ < 1) { setStatus('loading', 'Recovering…'); hh.recoverMediaError(); return; }
+        failStream(r, a, 'error', d.details);
+      });
+      hh.loadSource(stream.url);
+      hh.attachMedia(video);
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = stream.url;
+      startPlayback(r, a);
+    } else {
+      failStream(r, a, 'error', window.Hls ? 'This browser cannot play HLS' : 'hls.js failed to load (check the internet connection)');
+    }
+  }
+
+  function startPlayback(r, a) {
+    const p = video.play();
+    if (p && p.catch) p.catch(err => {
+      if (r !== run || a !== attempt || !err) return;
+      if (err.name === 'NotAllowedError') {            // autoplay with sound is blocked: start muted
+        if (!video.muted) ignoreVol = true;
+        video.muted = true;
+        video.play().catch(() => {});
+        setNote('Started muted (browser autoplay policy). Use the speaker icon for sound.');
+      }
+    });
+  }
+
+  function failStream(r, a, kind, msg) {
+    if (r !== run || a !== attempt) return;
+    failInfo.total++;
+    if (kind === 'geo') failInfo.geo++;
+    failInfo.last = { kind, msg };
+    Logger.warn('PLAYER', 'Stream failed (' + kind + '): ' + msg, { url: curStream && curStream.url });
+    nextStream(r);
+  }
+
+  function failAll(r) {
+    if (r !== run) return;
+    clearTimeout(timer);
+    teardown();
+    const allGeo = failInfo.geo > 0 && failInfo.geo === failInfo.total;
+    const last = failInfo.last || { kind: 'error', msg: '' };
+    if (allGeo) setStatus('geo', 'Possibly blocked in your region', last.msg);
+    else if (last.kind === 'timeout') setStatus('error', 'No response (timed out)', last.msg);
+    else setStatus('error', 'Channel unavailable', last.msg);
+    updateDetails();
+    Logger.error('PLAYER', 'All streams failed for ' + cur.name);
+    const c = cur;
+    if (!runPlayed) markDead(c, allGeo ? 'geo' : last.kind);
+    if (settings.autoSkip && skipChain < 10) {
+      skipChain++;
+      setTimeout(() => { if (cur === c && statusEl.classList.contains(allGeo ? 'geo' : 'error')) zap(1, { auto: true }); }, 1500);
+    }
+  }
+
+  function markDead(ch, kind) {
+    dead[ch.uid] = { t: Date.now(), k: kind };
+    store.set('dead', dead);
+    const el = findRow('c:' + ch.uid);
+    if (el) { el.classList.add('dead'); el.title = 'Failed to start (' + kind + ')'; }
+  }
+
+  video.addEventListener('playing', () => {
+    if (!curStream) return;
+    clearTimeout(timer);
+    playing = true; runPlayed = true; skipChain = 0;
+    setStatus('', '');                    // no “playing” message: the picture says it
+    updateDetails();
+    if (dead[cur.uid]) {
+      delete dead[cur.uid]; store.set('dead', dead);
+      const el = findRow('c:' + cur.uid);
+      if (el) { el.classList.remove('dead'); el.removeAttribute('title'); }
+    }
+    if (recordPending) { recordPending = false; addHistory(cur, curStream.url); pushRecent(cur); }
+    markActive();
+  });
+  video.addEventListener('waiting', () => { if (playing) setStatus('loading', 'Buffering…'); });
+  video.addEventListener('loadedmetadata', updateDetails);
+  video.addEventListener('resize', updateDetails);
+  video.addEventListener('error', () => {
+    if (hls || !video.getAttribute('src') || !video.error) return;
+    failStream(run, attempt, 'error', video.error.message || 'Playback error');
+  });
+  video.addEventListener('volumechange', () => {
+    if (ignoreVol) { ignoreVol = false; return; }
+    store.set('vol', video.volume);
+    store.set('muted', video.muted);
+    if (!video.muted) setNote('');
+  });
+
+  /* ---------- Details line, statistics ---------- */
+  function updateDetails() {
+    if (!curStream || !cur) { detailsEl.textContent = ''; return; }
+    const w = video.videoWidth, hgt = video.videoHeight;
+    const res = w && hgt ? w + '×' + hgt : (curStream.quality ? curStream.quality + 'p' : '');
+    const bw = bitrate ? (bitrate >= 1e6 ? (bitrate / 1e6).toFixed(1) + ' Mbps' : Math.round(bitrate / 1000) + ' kbps') : '';
+    detailsEl.textContent = [curStream.source, res, bw].filter(Boolean).join(' · ');
+    detailsEl.title = 'Resolution comes from the decoded video. The bitrate is the HLS variant bitrate, not measured throughput.';
+  }
+
+  let statsTimer = null;
+  function toggleStats() {
+    statsEl.hidden = !statsEl.hidden;
+    clearInterval(statsTimer);
+    if (!statsEl.hidden) { updateStats(); statsTimer = setInterval(updateStats, 1000); }
+  }
+  function updateStats() {
+    const L = [['Channel', cur ? cur.name : '—'], ['Resolution', video.videoWidth ? video.videoWidth + '×' + video.videoHeight : '—']];
+    if (curStream) L.push(['Source', curStream.source + (cur.streams.length > 1 ? ' (stream ' + (cur.streams.indexOf(curStream) + 1) + ' of ' + cur.streams.length + ')' : '')]);
+    if (hls) {
+      const lv = hls.levels && hls.levels[hls.currentLevel];
+      if (lv) {
+        L.push(['Level', (lv.height ? lv.height + 'p ' : '') + Math.round((lv.bitrate || 0) / 1000) + ' kbps' + (hls.autoLevelEnabled ? ' (auto)' : '')]);
+        const codecs = [lv.videoCodec, lv.audioCodec].filter(Boolean).join(' / ');
+        if (codecs) L.push(['Codecs', codecs]);
+      }
+      if (hls.bandwidthEstimate) L.push(['Bandwidth estimate', (hls.bandwidthEstimate / 1e6).toFixed(2) + ' Mbps']);
+      if (isFinite(hls.latency) && hls.latency > 0) L.push(['Live latency', hls.latency.toFixed(1) + ' s']);
+    } else if (curStream) L.push(['Engine', 'native HLS']);
+    let ahead = 0;
+    const b = video.buffered;
+    for (let i = 0; i < b.length; i++) if (video.currentTime >= b.start(i) && video.currentTime <= b.end(i)) ahead = b.end(i) - video.currentTime;
+    L.push(['Buffer', ahead.toFixed(1) + ' s']);
+    const q = video.getVideoPlaybackQuality && video.getVideoPlaybackQuality();
+    if (q) L.push(['Dropped frames', q.droppedVideoFrames + ' / ' + q.totalVideoFrames]);
+    statsEl.replaceChildren(...L.map(([k, v]) => h('div', { class: 'stats-row' },
+      h('span', { class: 'stats-key', text: k }),
+      h('span', { class: 'stats-value', text: String(v) })
+    )));
+  }
+
+  /* ---------- Stream / quality / audio / subtitle selectors ---------- */
+  function fillSelect(sel, options, selected, min) {
+    sel.textContent = '';
+    for (const [v, t] of options) sel.append(h('option', { value: v, text: t }));
+    sel.value = String(selected);
+    sel.hidden = options.length < (min || 2);
+  }
+  function resetTracks() { selQ.hidden = selA.hidden = selS.hidden = selStream.hidden = true; }
+  function populateStreamSelect() {
+    const s = cur.streams;
+    if (s.length < 2) { selStream.hidden = true; return; }
+    const o = [['auto', 'Stream: Auto']].concat(s.map((x, i) =>
+      [x.url, 'Stream ' + (i + 1) + ' · ' + x.source + (x.quality ? ' · ' + x.quality + 'p' : '') + (x.geo ? ' · geo' : '')]));
+    fillSelect(selStream, o, opts.force || 'auto', 2);
+  }
+  function buildQuality(hh) {
+    const lv = hh.levels.map((l, i) => ({ i, l })).sort((a, b) => (b.l.height || 0) - (a.l.height || 0) || (b.l.bitrate || 0) - (a.l.bitrate || 0));
+    const o = [['-1', 'Quality: Auto']].concat(lv.map(({ i, l }) =>
+      [String(i), ((l.height ? l.height + 'p' : '') + (l.bitrate ? ' · ' + Math.round(l.bitrate / 1000) + ' kbps' : '')) || 'Level ' + i]));
+    fillSelect(selQ, o, -1, 3);
+  }
+  function buildAudio(hh) {
+    fillSelect(selA, hh.audioTracks.map((t, i) => [String(i), 'Audio: ' + (t.name || t.lang || (i + 1))]), hh.audioTrack, 2);
+  }
+  function buildSubs(hh) {
+    fillSelect(selS, [['-1', 'Subtitles: off']].concat(hh.subtitleTracks.map((t, i) => [String(i), 'Sub: ' + (t.name || t.lang || (i + 1))])), hh.subtitleTrack, 2);
+  }
+  selStream.addEventListener('change', () => { if (cur) play(cur, { record: false, force: selStream.value === 'auto' ? null : selStream.value }); });
+  selQ.addEventListener('change', () => { if (hls) hls.currentLevel = parseInt(selQ.value, 10); });
+  selA.addEventListener('change', () => { if (hls) hls.audioTrack = parseInt(selA.value, 10); });
+  selS.addEventListener('change', () => { if (hls) hls.subtitleTrack = parseInt(selS.value, 10); });
+
+  /* ---------- Zapping ---------- */
+  function zap(dir, o) {
+    const l = shown.length ? shown : channels.filter(c => !isHidden(c));
+    if (!l.length) return;
+    const idx = cur ? l.findIndex(c => c.uid === cur.uid) : -1;
+    let i = idx < 0 ? (dir > 0 ? -1 : 0) : idx;
+    for (let step = 0; step < l.length; step++) {
+      i = (i + dir + l.length) % l.length;
+      if (!dead[l[i].uid]) break;
+    }
+    play(l[i], o);
+    revealChannel(l[i]);
+  }
+
+  /* ---------- Fullscreen ---------- */
+  function applyFsMode() {
+    const app = settings.fsMode === 'app';
+    if (app) video.setAttribute('controlslist', 'nofullscreen'); else video.removeAttribute('controlslist');
+    btnFs.hidden = !app;
+  }
+  function toggleFs() {
+    if (document.fullscreenElement) { document.exitFullscreen(); return; }
+    const target = settings.fsMode === 'app' ? box : video;
+    if (target.requestFullscreen) target.requestFullscreen().catch(() => {});
+  }
+  video.addEventListener('dblclick', e => { if (settings.fsMode === 'app') { e.preventDefault(); toggleFs(); } });
+  document.addEventListener('fullscreenchange', () => { updateOverlay(); if (inAppFs() && cur) flashName(); });
+
+  /* ---------- Toolbar buttons ---------- */
+  $('btn-prev').onclick = () => zap(-1);
+  $('btn-next').onclick = () => zap(1);
+  btnBack.onclick = () => goHistory(-1);
+  btnFwd.onclick = () => goHistory(1);
+  btnFav.onclick = () => { if (cur) toggleFav(cur); };
+  $('btn-stats').onclick = toggleStats;
+  btnFs.onclick = toggleFs;
+
+  /* =====================================================================
+     Tabs and search
+     ===================================================================== */
+  function syncTabs() { document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view)); }
+  $('tabs').addEventListener('click', e => {
+    const t = e.target.closest('.tab');
+    if (!t) return;
+    view = t.dataset.view; openGroup = null;
+    store.set('view', view);
+    syncTabs();
+    render({ focusId: null });
+    list.scrollTop = 0;
+  });
+  let searchTimer = null;
+  searchEl.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { query = searchEl.value; openGroup = null; render({ focusId: null }); }, 200);
+  });
+
+  /* =====================================================================
+     Keyboard
+     ===================================================================== */
+  function activateRow(el) {
+    if (el.classList.contains('group')) toggleGroup(el.dataset.group);
+    else if (el._ch) play(el._ch);
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey || dlg.open) return;
+    const t = e.target, tag = (t && t.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+      if (t === searchEl) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); focusRow(list.querySelector('li.row')); }
+        else if (e.key === 'Escape') { searchEl.value = ''; query = ''; render({ focusId: null }); searchEl.blur(); }
+      }
+      return;
+    }
+    const k = e.key;
+
+    if (inAppFs() && (k === 'ArrowUp' || k === 'ArrowDown')) { e.preventDefault(); zap(k === 'ArrowUp' ? -1 : 1); return; }
+
+    if (tag !== 'VIDEO') {                       // on the video, arrows keep their native seek/volume meaning
+      const c = cursorEl();
+      switch (k) {
+        case 'ArrowDown': e.preventDefault(); moveCursor(1); return;
+        case 'ArrowUp': e.preventDefault(); moveCursor(-1); return;
+        case 'Home': if (c) { e.preventDefault(); jumpCursor(false); return; } break;
+        case 'End': if (c) { e.preventDefault(); jumpCursor(true); return; } break;
+        case 'Enter': if (c) { e.preventDefault(); activateRow(c); return; } break;
+        case 'ArrowRight':
+          if (c && c.classList.contains('group')) {
+            e.preventDefault();
+            if (openGroup !== c.dataset.group) toggleGroup(c.dataset.group, true); else moveCursor(1);
+            return;
+          }
+          break;
+        case 'ArrowLeft':
+          if (c && c.classList.contains('group')) {
+            e.preventDefault();
+            if (openGroup === c.dataset.group) toggleGroup(c.dataset.group, false);
+            return;
+          }
+          if (c && c.dataset.group) { e.preventDefault(); focusRow(findRow('g:' + c.dataset.group)); return; }
+          break;
+      }
+    }
+
+    switch (k.length === 1 ? k.toLowerCase() : k) {
+      case 'n': zap(1); break;
+      case 'p': zap(-1); break;
+      case ',': goHistory(-1); break;
+      case '.': goHistory(1); break;
+      case 'm': video.muted = !video.muted; break;
+      case 'i': toggleStats(); break;
+      case 'f': toggleFs(); break;
+      case 's': {
+        const c = cursorEl();
+        const ch = c && c._ch ? c._ch : cur;
+        if (ch) toggleFav(ch);
+        break;
+      }
+      case '/': e.preventDefault(); searchEl.focus(); searchEl.select(); break;
+    }
+  });
+
+  /* =====================================================================
+     Settings dialog
+     ===================================================================== */
+  const FONTS = { s: '12px', m: '14px', l: '18px' };
+  const applyFont = () => document.body.style.setProperty('--fs', FONTS[settings.fontSize] || FONTS.m);
+  const saveSettings = () => store.set('settings', settings);
+  const savePlaylists = () => store.set('playlists', playlists);
+  const plMsg = t => { $('pl-msg').textContent = t; };
+
+  function renderPlaylists() {
+    const boxEl = $('pl-list');
+    boxEl.textContent = '';
+    for (const p of playlists) {
+      const st = plStatus[p.id] || {};
+      const info = h('div', { class: 'pl-info' }, h('b', { text: p.name }), h('small', { text: p.type === 'file' ? 'local file' : p.url }));
+      if (st.n != null) info.append(h('small', { text: st.n.toLocaleString('en') + ' entries · ' + st.info }));
+      if (st.err) info.append(h('small', { class: 'err', text: '⚠ ' + st.err }));
+      if (st.warn) info.append(h('small', { class: 'warn', text: '⚠ ' + st.warn }));
+      boxEl.append(h('div', { class: 'pl-item' },
+        h('input', { type: 'checkbox', checked: p.enabled, title: 'Enabled', onchange: e => { p.enabled = e.target.checked; savePlaylists(); reloadSoon(); } }),
+        info,
+        h('button', { class: 'btn', type: 'button', text: 'Metadata', title: 'How countries and categories are read', onclick: () => { openMeta = openMeta === p.id ? null : p.id; renderPlaylists(); } }),
+        p.builtin ? null : h('button', { class: 'btn', type: 'button', text: '🗑', title: 'Delete', onclick: () => deletePlaylist(p) })
+      ));
+      if (openMeta === p.id) boxEl.append(metaEditor(p));
+    }
+  }
+
+  function deletePlaylist(p) {
+    playlists = playlists.filter(x => x !== p);
+    delete plData[p.id]; delete plStatus[p.id];
+    idbDel('pl2:' + p.id);
+    if (openMeta === p.id) openMeta = null;
+    savePlaylists(); renderPlaylists(); reloadSoon();
+  }
+
+  /** Text report that shows what the playlist really contains and how it is being interpreted. */
+  function inspectText(p) {
+    const d = plData[p.id];
+    if (!d || !d.raw.length) return 'No data loaded for this playlist yet.';
+    const raw = d.raw, n = raw.length;
+    const cnt = { 'tvg-id': 0, 'tvg-logo': 0, 'tvg-country': 0, 'tvg-language': 0, 'group-title': 0 };
+    const extra = {}, gv = new Map(), tv = new Map();
+    for (const r of raw) {
+      if (r.id) cnt['tvg-id']++;
+      if (r.logo) cnt['tvg-logo']++;
+      if (r.tc) { cnt['tvg-country']++; tv.set(r.tc, (tv.get(r.tc) || 0) + 1); }
+      if (r.lang) cnt['tvg-language']++;
+      if (r.group) { cnt['group-title']++; for (const g of catsFrom(r.group)) gv.set(g, (gv.get(g) || 0) + 1); }
+      if (r.a) for (const k in r.a) extra[k] = (extra[k] || 0) + 1;
+    }
+    const top = (m, k = 8) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([v, c]) => v + ' ×' + c).join(', ') || '—';
+    const f = x => x.toLocaleString('en');
+    const countrySet = new Set(), catSet = new Set();
+    let noCountry = 0, noCat = 0;
+    const res = raw.map(r => resolveEntry(r, p, d));
+    for (const e of res) {
+      e.countries.forEach(v => countrySet.add(v)); e.cats.forEach(v => catSet.add(v));
+      if (!e.countries.length) noCountry++;
+      if (!e.cats.length) noCat++;
+    }
+    const L = [];
+    L.push('Entries: ' + f(n));
+    L.push('Attributes: ' + Object.entries(cnt).map(([k, v]) => k + ' ' + f(v)).join(' · '));
+    const ex = Object.entries(extra).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => k + ' ' + f(v));
+    if (ex.length) L.push('Other attributes (usable via “Other attribute…”): ' + ex.join(' · '));
+    L.push('');
+    L.push('group-title values: ' + top(gv));
+    L.push('  → looks like ' + (d.info.groupIsCountry ? 'COUNTRIES' : 'CATEGORIES') + ' (' + d.info.countryLike + ' of ' + d.info.groupCount + ' distinct values are country names)');
+    if (tv.size) L.push('tvg-country values: ' + top(tv));
+    if (d.idx.country) L.push('Country index: ' + f(Object.keys(d.idx.country).length) + ' streams matched');
+    if (d.idx.category) L.push('Category index: ' + f(Object.keys(d.idx.category).length) + ' streams matched');
+    L.push('');
+    L.push('Result: ' + f(countrySet.size) + ' countries · ' + f(catSet.size) + ' categories · ' + f(noCountry) + ' without country · ' + f(noCat) + ' without category');
+    L.push('');
+    L.push('Samples (name → country | categories):');
+    const step = Math.max(1, Math.floor(n / 6));
+    for (let i = 0; i < n && L.length < 40; i += step) {
+      const e = res[i];
+      L.push('  ' + e.name.slice(0, 40) + ' → ' + (e.countries.join(', ') || '(none)') + ' | ' + (e.cats.join(', ') || '(none)'));
+      if (i + step >= n || L.filter(x => x.startsWith('  ')).length >= 6) break;
+    }
+    return L.join('\n');
+  }
+
+  function metaEditor(p) {
+    const m = p.meta;
+    const pre = h('pre', { class: 'inspect' });
+    const refresh = () => { pre.textContent = inspectText(p); };
+    let t = null;
+    const apply = reload => {
+      savePlaylists();
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        if (reload) { plData[p.id] = await loadPlaylist(p, true); renderPlaylists(); }
+        rebuild(); refresh();
+      }, 250);
+    };
+    const sel = (key, options, afterChange) => {
+      const s = h('select', null, options.map(([v, x]) => h('option', { value: v, text: x })));
+      s.value = m[key];
+      s.addEventListener('change', () => { m[key] = s.value; if (afterChange) afterChange(); apply(false); });
+      return s;
+    };
+    const txt = (obj, key, ph, reload) => {
+      const i = h('input', { type: 'text', placeholder: ph });
+      i.value = obj[key] || '';
+      i.addEventListener(reload ? 'change' : 'input', () => { obj[key] = i.value.trim(); apply(reload); });
+      return i;
+    };
+    const row = (label, el, hint) => h('div', { class: 'mrow' }, h('span', { text: label }), el, hint ? h('small', { text: hint }) : null);
+
+    const cAttr = txt(m, 'countryAttr', 'attribute name, e.g. country');
+    const kAttr = txt(m, 'categoryAttr', 'attribute name, e.g. tvg-group');
+    cAttr.hidden = m.countrySource !== 'attr';
+    kAttr.hidden = m.categorySource !== 'attr';
+    const cSel = sel('countrySource', [
+      ['auto', 'Auto-detect'], ['tvg-country', 'tvg-country attribute'], ['group', 'group-title'],
+      ['tvg-id', 'tvg-id suffix (e.g. “.us”)'], ['attr', 'Other attribute…'], ['none', 'Do not use']
+    ], () => { cAttr.hidden = m.countrySource !== 'attr'; });
+    const kSel = sel('categorySource', [
+      ['auto', 'Auto-detect'], ['group', 'group-title'], ['attr', 'Other attribute…'], ['none', 'Do not use']
+    ], () => { kAttr.hidden = m.categorySource !== 'attr'; });
+
+    const ed = h('div', { class: 'meta' },
+      row('Country from', h('div', { class: 'inline' }, cSel, cAttr)),
+      row('Default country', txt(m, 'fixedCountry', 'e.g. Spain'), 'Used when no country is found (or for single-country lists, like a national TV list).'),
+      row('Category from', h('div', { class: 'inline' }, kSel, kAttr)),
+      row('Country index URL', txt(p, 'countryIndex', 'optional M3U whose group-title is the country', true), 'Companion playlist, matched to channels by stream URL.'),
+      row('Category index URL', txt(p, 'categoryIndex', 'optional M3U whose group-title is the category', true)),
+      pre
+    );
+    refresh();
+    return ed;
+  }
+
+  $('pl-add').onclick = () => {
+    const raw = $('pl-url').value.trim();
+    if (!raw) return plMsg('Enter a URL.');
+    let u;
+    try { u = new URL(raw); if (!/^https?:$/.test(u.protocol)) throw 0; } catch (_) { return plMsg('Invalid URL (it must start with http:// or https://).'); }
+    if (playlists.some(p => p.url === raw)) return plMsg('This playlist is already in the list.');
+    const name = $('pl-name').value.trim() || (u.hostname + u.pathname.replace(/\/$/, ''));
+    const p = { id: 'u' + Date.now().toString(36), name, url: raw, type: 'url', enabled: true, meta: { ...DEFAULT_META } };
+    playlists.push(p);
+    savePlaylists();
+    $('pl-url').value = ''; $('pl-name').value = '';
+    plMsg('Loading…');
+    openMeta = p.id;                // open Metadata right away so the result can be checked
+    renderPlaylists();
+    loadAll().then(() => plMsg('Loaded. Check the Metadata box below the playlist to see how countries and categories were read.'));
+  };
+
+  $('pl-file').onchange = async e => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const raw = parseM3U(await f.text());
+    if (!raw.length) return plMsg('No channels found in “' + f.name + '”.');
+    const id = 'f' + Date.now().toString(36);
+    await idbSet('pl2:' + id, { ts: Date.now(), sig: '', raw, idx: {} });
+    const p = { id, name: f.name, type: 'file', enabled: true, meta: { ...DEFAULT_META } };
+    playlists.push(p);
+    savePlaylists();
+    openMeta = p.id;
+    plMsg(raw.length.toLocaleString('en') + ' entries loaded from “' + f.name + '”. Check the Metadata box below the playlist.');
+    loadAll();
+  };
+  $('pl-refresh').onclick = () => { plMsg('Refreshing…'); loadAll(true).then(() => plMsg('Done.')); };
+
+  const bindCheck = (id, key) => {
+    const el = $(id);
+    el.checked = !!settings[key];
+    el.onchange = () => { settings[key] = el.checked; saveSettings(); render({ focusId: null }); };
+  };
+  bindCheck('opt-hideDead', 'hideDead');
+  bindCheck('opt-hideGeo', 'hideGeo');
+  bindCheck('opt-autoSkip', 'autoSkip');
+  bindCheck('opt-autoResume', 'autoResume');
+  $('opt-merge').value = settings.merge;
+  $('opt-merge').onchange = e => { settings.merge = e.target.value; saveSettings(); rebuild(); };
+  $('opt-fs').value = settings.fsMode;
+  $('opt-fs').onchange = e => { settings.fsMode = e.target.value; saveSettings(); applyFsMode(); };
+  $('opt-font').value = settings.fontSize;
+  $('opt-font').onchange = e => { settings.fontSize = e.target.value; saveSettings(); applyFont(); };
+  const historyMaxInput = $('opt-history-max');
+  historyMaxInput.value = settings.historyMax;
+  historyMaxInput.onchange = () => {
+    const parsed = Math.floor(Number(historyMaxInput.value));
+    settings.historyMax = Math.max(HISTORY_MIN, Math.min(HISTORY_LIMIT, Number.isFinite(parsed) ? parsed : HISTORY_DEFAULT));
+    historyMaxInput.value = settings.historyMax;
+    if (hist.length > settings.historyMax) {
+      const excess = hist.length - settings.historyMax;
+      hist.splice(0, excess);
+      hIdx = Math.max(-1, hIdx - excess);
+    }
+    saveSettings();
+    updateNav();
+  };
+
+  $('btn-export').onclick = () => {
+    if (!favs.length) return plMsg('No favorites to export.');
+    const q = s => String(s || '').replace(/"/g, "'");
+    const lines = ['#EXTM3U'];
+    for (const f of favs) {
+      lines.push('#EXTINF:-1 tvg-id="' + q(f.id) + '" tvg-logo="' + q(f.logo) + '" tvg-country="' + q(f.countries.join(';')) + '" group-title="' + q(f.cats.join(';')) + '",' + f.name, f.streams[0].url);
+    }
+    const a = h('a', { href: URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'audio/x-mpegurl' })), download: 'favorites.m3u' });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  $('btn-reset-dead').onclick = () => {
+    dead = {}; store.set('dead', dead);
+    $('dead-count').textContent = '0';
+    render({ focusId: null });
+  };
+  $('btn-clear-recent').onclick = () => {
+    recent = []; store.set('recent', recent);
+    if (view === 'recent') render({ focusId: null });
+  };
+  $('btn-settings').onclick = () => {
+    $('dead-count').textContent = Object.keys(dead).length;
+    renderPlaylists();
+    dlg.showModal();
+  };
+  $('dlg-close').onclick = () => dlg.close();
+  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+
+  /* =====================================================================
+     Start
+     ===================================================================== */
+  Logger.info('SYSTEM', APP + ' started · hls.js ' + (window.Hls ? 'available' : 'NOT available') + ' · favorites: ' + favs.length);
+  applyFont();
+  applyFsMode();
+  video.volume = store.get('vol', 1);
+  video.muted = store.get('muted', false);
+  syncTabs();
+  updateNav();
+  updateFavBtn();
+  updateCount();
+  render();
+  loadAll().then(() => {
+    if (!settings.autoResume) return;
+    const last = revive(store.get('last', null));
+    if (last) play(byUrl.get(last.uid) || last);
+  });
+})();
+</script>
+</body>
+</html>

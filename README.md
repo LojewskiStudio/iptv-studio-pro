@@ -2,7 +2,9 @@
 
 A single-file IPTV player for HLS streams and M3U/M3U8 playlists. It runs in any modern browser, needs no application server or backend, and can be hosted as a static page.
 
-**Live page:** <https://lojewskistudio.github.io/iptv-studio-pro/>
+**DEMO:** https://lojewskistudio.github.io/iptv-studio-pro/
+
+<sub><i>(The online demo is provided for preview. For full functionality and the best experience, download and run the application locally)</i></sub>
 
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/5a99611d-42c8-4229-b8fd-624c8c5d2d3a" />
 
@@ -32,11 +34,8 @@ Open the live page above.
 1. Download `index.html`.
 2. Open it in your browser. No server is needed.
 
-Playback uses [hls.js](https://github.com/video-dev/hls.js), loaded from the jsDelivr CDN, so an internet connection is needed. To work offline, download `hls.min.js`, place it next to `index.html`, and change the `<script src="…">` line to point to it. Safari plays HLS natively and does not depend on hls.js.
+<sub><i>(Playback uses [hls.js](https://github.com/video-dev/hls.js), loaded from the jsDelivr CDN, so an internet connection is needed)</i></sub>
 
-### Hosting on GitHub Pages
-
-Publish the repository with GitHub Pages and keep the player in a file named `index.html` at the root, so the page opens at the repository's address.
 
 ## Using playlists
 

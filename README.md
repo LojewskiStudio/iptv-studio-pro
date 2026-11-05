@@ -4,7 +4,7 @@ A single-file IPTV player for HLS streams and M3U/M3U8 playlists. It runs in any
 
 **DEMO:** https://lojewskistudio.github.io/iptv-studio-pro/
 
-<sub><i>(The online demo is provided for preview. For full functionality and the best experience, download and run the application locally)</i></sub>
+<sub>(The online demo is provided for preview. For full functionality and the best experience, download and run the application locally)</sub>
 
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/5a99611d-42c8-4229-b8fd-624c8c5d2d3a" />
 
@@ -19,7 +19,7 @@ A single-file IPTV player for HLS streams and M3U/M3U8 playlists. It runs in any
 - **Backup streams:** optionally merge entries that share the same `tvg-id`. If one stream fails, the next one is tried automatically.
 - **Navigation:** zap to the next or previous channel in the list, and go Back/Forward through the channels that actually started playing.
 - **Stream controls:** choose the HLS quality level, audio track, and subtitles when the stream offers them. A statistics panel shows resolution, bitrate, buffer, and dropped frames.
-- **Clear status:** connection, buffering, unavailable, and possible geo-block messages appear below the player. Nothing is shown while the picture is playing normally.
+- **Clear status:** connection, buffering, unavailable, and possible geo-block messages are displayed.
 - **Keyboard navigation:** arrow keys move a cursor through the list without starting playback; Enter plays.
 - **Fast restarts:** playlists are cached in the browser for 12 hours.
 
@@ -33,8 +33,6 @@ Open the live page above.
 
 1. Download `index.html`.
 2. Open it in your browser. No server is needed.
-
-<sub><i>(Playback uses [hls.js](https://github.com/video-dev/hls.js), loaded from the jsDelivr CDN, so an internet connection is needed)</i></sub>
 
 
 ## Using playlists
@@ -101,6 +99,10 @@ When you load a playlist or play a stream, your browser connects directly to the
 ## Third-party services and content
 
 This project does not host, provide, or endorse any streams or playlists. The default playlists ([IPTV-Org](https://github.com/iptv-org/iptv) and [Free-TV](https://github.com/Free-TV/IPTV)) are maintained by third parties. Playlist entries, logos, and streams remain subject to their owners' terms and rights, and you are responsible for making sure you may access the content you play. hls.js is licensed separately from this project.
+
+<sub>(Playback uses [hls.js](https://github.com/video-dev/hls.js), loaded from the jsDelivr CDN)</sub>
+
+
 
 ## License
 

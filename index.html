@@ -28,14 +28,15 @@
 <style>
   :root {
     --accent: #ff8400;
-    --bg: #050505;
-    --panel: #121212;
-    --panel2: #161616;
-    --item: #181818;
-    --item-h: #2a2a2a;
-    --line: #262626;
+    --bg: #0f0f0f;
+    --panel: #0f0f0f;
+    --panel2: #202020;
+    --item: #111111;
+    --item-h: #313131;
+    --line: #084052;
     --muted: #8d8d8d;
-    --sig:#ca6f92;
+    --sig:#aedaf3;
+    --cont:#a4ca95;
     --fs: 14px;
   }
   * { box-sizing: border-box; }
@@ -124,16 +125,16 @@
 
   /* ---------- Right panel ---------- */
   .right {
-    width: clamp(300px, 24vw, 420px); display: flex; flex-direction: column;
+    width: clamp(300px, 24vw, 330px); display: flex; flex-direction: column;
     background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
   }
   .right-header { padding: 14px; background: var(--panel2); display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--line); }
   .title-row { display: flex; align-items: center; justify-content: space-between; }
-  .signature { margin-top: -16px; color: var(--sig); font-size: .70em; letter-spacing: .02em; }
+  .signature { margin-top: -14px; color: var(--sig); font-size: .70em; letter-spacing: .02em; }
   h1 { margin: 0; font-size: 1.45em; color: var(--accent); text-shadow: 0 0 16px #ff840073; }
-  .tabs { display: flex; flex-wrap: wrap; gap: 5px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 2px; }
   .tab {
-    padding: 6px 9px; border: 0; border-radius: 6px; font: inherit; font-size: .72em;
+    padding: 3px 6px; border: 0; border-radius: 3px; font: inherit; font-size: .72em;
     background: #262626; color: #ccc; cursor: pointer; transition: .15s;
   }
   .tab:hover { background: #343434; color: var(--accent); }
@@ -143,7 +144,7 @@
     font: inherit; font-size: .70em; background: #1a1a1a; color: #fff; outline: 0;
   }
   #search:focus, .dlg input[type=text]:focus, .dlg input[type=url]:focus { border-color: var(--accent); }
-  .count { color: var(--muted); font-size: .8em; }
+  .count { color: var(--cont); font-size: .8em; }
 
   #channel-list {
     flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 10px; list-style: none;
@@ -787,20 +788,12 @@
   /* =====================================================================
      DOM references
      ===================================================================== */
-  const video = $('video'), box = $('video-box'), list = $('channel-list'), searchEl = $('search');
+  let video = $('video');          // `let`: the element is replaced when it keeps text tracks of the previous channel
+  const box = $('video-box'), list = $('channel-list'), searchEl = $('search');
   const statusEl = $('status'), noteEl = $('note'), detailsEl = $('details'), statsEl = $('stats'), dlg = $('settings');
   const selStream = $('sel-stream'), selQ = $('sel-quality'), selA = $('sel-audio'), selS = $('sel-subs');
-  const hoverNativeControls = !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches);
-  video.controls = !hoverNativeControls;
-  function handleVideoPointer(e) {
-    if (e.pointerType === 'mouse' || e.pointerType === 'pen' || e.pointerType === 'touch') video.controls = true;
-  }
-  box.addEventListener('pointerenter', handleVideoPointer);
-  box.addEventListener('pointermove', handleVideoPointer);
-  box.addEventListener('pointerdown', handleVideoPointer);
-  box.addEventListener('pointerleave', e => {
-    if (hoverNativeControls && (e.pointerType === 'mouse' || e.pointerType === 'pen')) video.controls = false;
-  });
+  // Keep native controls stable: Firefox can recalculate native cue sizing when toggled on hover.
+  video.controls = true;
   const btnBack = $('btn-back'), btnFwd = $('btn-fwd'), btnFav = $('btn-fav'), btnFs = $('btn-fs');
 
   /* =====================================================================
@@ -1153,11 +1146,53 @@
   let timer = null, playing = false, runPlayed = false, recordPending = false;
   let recoveries = 0, netRetries = 0, skipChain = 0, bitrate = 0, ignoreVol = false;
 
+  /** Remove every subtitle / text track left on the <video> by the previous channel.
+   *  Without this, the native CC menu keeps the old channel's subtitles until a page refresh. */
+  function clearTextTracks() {
+    // 1. <track> elements that were appended to the DOM
+    video.querySelectorAll('track').forEach(t => t.remove());
+    // 2. TextTrack objects created with addTextTrack() cannot be deleted, only disabled and emptied
+    const tt = video.textTracks;
+    if (!tt) return;
+    for (let i = 0; i < tt.length; i++) {
+      const t = tt[i];
+      try { t.mode = 'disabled'; } catch (_) {}
+      try {
+        const cues = t.cues;
+        if (cues) for (let j = cues.length - 1; j >= 0; j--) { try { t.removeCue(cues[j]); } catch (_) {} }
+      } catch (_) {}
+    }
+  }
+
   function teardown() {
-    if (hls) { try { hls.destroy(); } catch (_) {} hls = null; }
+    if (hls) {
+      try { hls.subtitleDisplay = false; } catch (_) {}
+      try { hls.destroy(); } catch (_) {}
+      hls = null;
+    }
     video.pause();
     video.removeAttribute('src');
     try { video.load(); } catch (_) {}
+    replaceVideoElement();
+  }
+
+  /** Text tracks added with addTextTrack() (hls.js subtitles / CEA-608) can never be removed from a
+   *  <video>, so the native CC button keeps showing them. The only clean fix is a brand-new element.
+   *  It is replaced only when leftover tracks exist, and never while the <video> itself is fullscreen
+   *  (replacing it would exit fullscreen); in that case the tracks are just disabled and emptied. */
+  function replaceVideoElement() {
+    const old = video;
+    if (!old.textTracks || old.textTracks.length === 0) return;
+    if (document.fullscreenElement === old) { clearTextTracks(); return; }
+    const nv = old.cloneNode(false);            // keeps id, playsinline, controls, controlslist, no children
+    nv.removeAttribute('src');
+    nv.controls = old.controls;
+    nv.volume = old.volume;
+    nv.muted = old.muted;
+    old.replaceWith(nv);
+    video = nv;
+    bindVideo(nv);
+    Logger.debug('PLAYER', 'Video element recreated (cleared leftover text tracks)');
   }
 
   function play(ch, o = {}) {
@@ -1205,7 +1240,7 @@
 
   function startStream(r, stream) {
     const a = ++attempt;
-    if (hoverNativeControls) video.controls = false;
+
     curStream = stream; bitrate = 0; playing = false; recoveries = 0; netRetries = 0;
     clearTimeout(timer);
     teardown();
@@ -1224,6 +1259,8 @@
       });
       hh.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => { if (hh === hls) buildAudio(hh); });
       hh.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => { if (hh === hls) buildSubs(hh); });
+      // hls.js updates subtitleTrack when its native text track is changed from the browser CC menu.
+      hh.on(Hls.Events.SUBTITLE_TRACK_SWITCH, () => { if (hh === hls) buildSubs(hh); });
       hh.on(Hls.Events.ERROR, (_, d) => {
         if (hh !== hls || a !== attempt || !d.fatal) return;
         const code = d.response && d.response.code;
@@ -1295,7 +1332,11 @@
     if (el) { el.classList.add('dead'); el.title = 'Failed to start (' + kind + ')'; }
   }
 
-  video.addEventListener('playing', () => {
+  /** All listeners of the <video> element. Called again whenever the element is recreated. */
+  function bindVideo(v) {
+  const on = (ev, fn) => v.addEventListener(ev, e => { if (v === video) fn(e); });   // ignore events of a replaced element
+  on('dblclick', e => { if (settings.fsMode === 'app') { e.preventDefault(); toggleFs(); } });
+  on('playing', () => {
     if (!curStream) return;
     clearTimeout(timer);
     playing = true; runPlayed = true; skipChain = 0;
@@ -1309,19 +1350,29 @@
     if (recordPending) { recordPending = false; addHistory(cur, curStream.url); pushRecent(cur); }
     markActive();
   });
-  video.addEventListener('waiting', () => { if (playing) setStatus('loading', 'Buffering…'); });
-  video.addEventListener('loadedmetadata', updateDetails);
-  video.addEventListener('resize', updateDetails);
-  video.addEventListener('error', () => {
+  on('waiting', () => { if (playing) setStatus('loading', 'Buffering…'); });
+  on('loadedmetadata', () => { updateDetails(); buildNativeSubs(v); });
+  if (v.textTracks) {
+    v.textTracks.addEventListener('addtrack', () => { if (v === video) buildNativeSubs(v); });
+    v.textTracks.addEventListener('change', () => {
+      if (v !== video) return;
+      if (hls) buildSubs(hls);       // hls.js path; its switch event refreshes again with the settled track
+      else buildNativeSubs(v);       // native HLS path
+    });
+  }
+  on('resize', updateDetails);
+  on('error', () => {
     if (hls || !video.getAttribute('src') || !video.error) return;
     failStream(run, attempt, 'error', video.error.message || 'Playback error');
   });
-  video.addEventListener('volumechange', () => {
+  on('volumechange', () => {
     if (ignoreVol) { ignoreVol = false; return; }
     store.set('vol', video.volume);
     store.set('muted', video.muted);
     if (!video.muted) setNote('');
   });
+  }
+  bindVideo(video);
 
   /* ---------- Details line, statistics ---------- */
   function updateDetails() {
@@ -1371,7 +1422,10 @@
     sel.value = String(selected);
     sel.hidden = options.length < (min || 2);
   }
-  function resetTracks() { selQ.hidden = selA.hidden = selS.hidden = selStream.hidden = true; }
+  function resetTracks() {
+    // Hide AND empty the selectors so nothing from the previous channel survives
+    [selQ, selA, selS, selStream].forEach(s => { s.textContent = ''; s.hidden = true; });
+  }
   function populateStreamSelect() {
     const s = cur.streams;
     if (s.length < 2) { selStream.hidden = true; return; }
@@ -1400,10 +1454,46 @@
   function buildSubs(hh) {
     fillSelect(selS, [['-1', 'Subtitles: off']].concat(hh.subtitleTracks.map((t, i) => [String(i), 'Sub: ' + (t.name || t.lang || (i + 1))])), hh.subtitleTrack, 2);
   }
+
+  // Native HLS (such as Firefox) exposes subtitle choices through textTracks.
+  // Mirror changes from the native CC menu in the app selector.
+  function buildNativeSubs(v = video) {
+    if (v !== video || hls) return;
+    const tracks = v.textTracks;
+    if (!tracks) return;
+    const eligible = [];
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      if (t.kind === 'subtitles' || t.kind === 'captions') eligible.push({ track: t, index: i });
+    }
+    if (!eligible.length) {
+      selS.textContent = '';
+      selS.hidden = true;
+      return;
+    }
+    const selected = eligible.find(x => x.track.mode === 'showing');
+    const options = [['-1', 'Subtitles: off']].concat(eligible.map(({ track, index }, n) => [String(index), 'Sub: ' + (track.label || track.language || ('Track ' + (n + 1)))]));
+    fillSelect(selS, options, selected ? selected.index : -1, 2);
+  }
   selStream.addEventListener('change', () => { if (cur) play(cur, { record: false, force: selStream.value === 'auto' ? null : selStream.value }); });
   selQ.addEventListener('change', () => { if (hls) hls.currentLevel = parseInt(selQ.value, 10); });
   selA.addEventListener('change', () => { if (hls) hls.audioTrack = parseInt(selA.value, 10); });
-  selS.addEventListener('change', () => { if (hls) hls.subtitleTrack = parseInt(selS.value, 10); });
+  selS.addEventListener('change', () => {
+    if (hls) {
+      hls.subtitleTrack = parseInt(selS.value, 10);
+      return;
+    }
+    const tracks = video.textTracks;
+    if (!tracks) return;
+    const selected = parseInt(selS.value, 10);
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      if (t.kind === 'subtitles' || t.kind === 'captions') {
+        try { t.mode = i === selected ? 'showing' : 'disabled'; } catch (_) {}
+      }
+    }
+    buildNativeSubs();
+  });
 
   /* ---------- Zapping ---------- */
   function zap(dir, o) {
@@ -1430,7 +1520,6 @@
     const target = settings.fsMode === 'app' ? box : video;
     if (target.requestFullscreen) target.requestFullscreen().catch(() => {});
   }
-  video.addEventListener('dblclick', e => { if (settings.fsMode === 'app') { e.preventDefault(); toggleFs(); } });
   document.addEventListener('fullscreenchange', () => { updateOverlay(); if (inAppFs() && cur) flashName(); });
 
   /* ---------- Toolbar buttons ---------- */

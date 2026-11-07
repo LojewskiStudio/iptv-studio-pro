@@ -8,6 +8,8 @@
   - Favorites, recent channels, playback history (Back / Forward), zapping
   - Automatic fallback between streams of the same channel (same tvg-id)
   - Quality, audio track and subtitle selection, stream statistics
+  - Manual browser recording with download (where supported)
+  - DVR (recorder)
   - Keyboard navigation: arrows move a cursor, Enter plays
 
   Requires hls.js (loaded from a CDN) for browsers without native HLS.
@@ -41,7 +43,7 @@
   --card:#232323; --meta:#1f1f1f; --meta-line:#2f2f2f; --dlg:#1a1a1a; --dlg-line:#333;
   /* text */
   --ink:#fff; --muted:#8d8d8d; --title:#ff8800; --sig:#aedaf3; --cont:#a4ca95;
-  --accent:#ff8400;
+  --accent:#ff8400; --tc: #ca0000;
   /* buttons / tabs / fields */
   --btn:#262626; --btn-h:#343434; --btn-ink:#98c5b4; --btn-line:#333; --btn-line-h:#444;
   --field:#1a1a1a; --field-line:#333;
@@ -114,6 +116,11 @@ video {
   background:var(--btn-h); color:var(--btn-hi, var(--accent)); border-color:var(--btn-line-h);
 }
 .btn:disabled { opacity:.38; cursor:not-allowed; }
+.btn.record { color:var(--muted); border-color:var(--btn-line); background:var(--btn); }
+.btn.record:hover:not(:disabled) { color:var(--btn-hi, var(--accent)); border-color:var(--btn-line-h); background:var(--btn-h); }
+.btn.record.is-recording { color:#fff; border-color:#ef6268; background:#a82e38; box-shadow:0 0 11px #e0444b66; animation:record-glow 1.4s ease-in-out infinite; }
+@keyframes record-glow { 50% { background:#c33b45; box-shadow:0 0 16px #e0444b99; } }
+@media (prefers-reduced-motion: reduce) { .btn.record.is-recording { animation:none; } }
 .btn.on { color:var(--on); border-color:var(--on-line); }
 .btn:focus-visible, select:focus-visible, .tab:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 select { max-width:200px; }
@@ -124,7 +131,10 @@ select { max-width:200px; }
 .now-text { min-width:0; flex:1 1 240px; }
 .now-name { font-size:1.2em; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .now-meta { color:var(--muted); font-size:.85em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.details { margin-left:auto; color:var(--muted); font-size:.75em; text-align:right; white-space:nowrap; }
+.detail-stack { display:flex; flex-direction:column; align-items:flex-end; gap:2px; margin-left:auto; text-align:right; white-space:nowrap; }
+.details { color:var(--muted); font-size:.75em; }
+.record-timecode { min-height:1.2em; color:var(--tc); font:600 .80em/1.2 ui-monospace,Consolas,monospace; letter-spacing:.08em; font-variant-numeric:tabular-nums; visibility:hidden; }
+.record-timecode.is-visible { visibility:visible; }
 .note { color:var(--warn-ink); font-size:.75em; }
 
 .status, .badge { border-radius:999px; font-weight:600; white-space:nowrap; }
@@ -222,6 +232,8 @@ dialog::backdrop { background:rgba(0,0,0,.75); }
 .pl-item { display:flex; gap:10px; align-items:center; padding:8px 10px; background:var(--card); border-radius:6px; margin-bottom:6px; }
 .pl-item input[type=checkbox], .opt input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent); flex:none; }
 .pl-info { flex:1; min-width:0; }
+.pl-name-edit { width:100%; min-width:0; padding:5px 7px; background:var(--field); color:var(--ink); border:1px solid var(--field-line); border-radius:5px; font:inherit; }
+.pl-name-edit:focus { outline:2px solid var(--accent); outline-offset:1px; }
 .pl-info b, .pl-info small { display:block; }
 .pl-info small { color:var(--muted); word-break:break-all; }
 .pl-info .err  { color:var(--err-ink); }
@@ -380,7 +392,7 @@ body[data-theme="nordic"] {
       </div>
       <span class="status" id="status" hidden></span>
       <span class="note" id="note" hidden></span>
-      <span class="details" id="details"></span>
+      <div class="detail-stack"><span class="details" id="details"></span><span class="record-timecode" id="record-timecode">00:00:00:00</span></div>
     </div>
 
     <div class="video-box" id="video-box">
@@ -408,6 +420,7 @@ body[data-theme="nordic"] {
         <select id="sel-subs" title="Subtitles" hidden></select>
         <span class="control-spacer"></span>
         <button class="btn" id="btn-fs" title="Fullscreen with status overlay (F)" hidden>⛶</button>
+        <button class="btn record" id="btn-record" title="Record the current stream">● REC</button>
         <button class="btn" id="btn-stats" title="Stream statistics (I)">Info</button>
         <button class="btn" id="btn-fav" title="Add to favorites (S)">☆ Favorite</button>
       </div>
@@ -486,6 +499,7 @@ body[data-theme="nordic"] {
     <label class="opt"><input type="checkbox" id="opt-hideGeo"> Hide channels marked “Geo-blocked”</label>
     <label class="opt"><input type="checkbox" id="opt-autoSkip"> When a channel fails, jump to the next one automatically</label>
     <label class="opt"><input type="checkbox" id="opt-autoResume"> Resume the last channel on start</label>
+    <label class="opt"><input type="checkbox" id="opt-dvr"> Enable DVR recording</label>
     <label class="opt" for="opt-history-max">Playback history limit:
       <input type="number" id="opt-history-max" min="1" max="1000" step="1" inputmode="numeric">
       <span>channels</span>
@@ -840,7 +854,7 @@ body[data-theme="nordic"] {
      State
      ===================================================================== */
   let settings = Object.assign(
-    { hideDead: true, hideGeo: false, autoSkip: false, autoResume: true, fontSize: 'm', merge: 'id', fsMode: 'native', historyMax: HISTORY_DEFAULT, theme: 'Stendhal' },
+    { hideDead: true, hideGeo: false, autoSkip: false, autoResume: true, fontSize: 'm', merge: 'id', fsMode: 'native', historyMax: HISTORY_DEFAULT, theme: 'Stendhal', dvrEnabled: true },
     store.get('settings', {})
   );
   settings.historyMax = Math.max(HISTORY_MIN, Math.min(HISTORY_LIMIT, Math.floor(Number(settings.historyMax) || HISTORY_DEFAULT)));
@@ -918,9 +932,9 @@ body[data-theme="nordic"] {
   for (const def of BUILTINS) {
     const p = playlists.find(x => x.id === def.id);
     if (!p) playlists.push({ ...def });
-    else { p.name = def.name; p.builtin = true; for (const k in def) if (p[k] === undefined) p[k] = def[k]; }
+    else { p.name = p.nameOverride || def.name; p.builtin = true; for (const k in def) if (p[k] === undefined) p[k] = def[k]; }
   }
-  playlists.forEach(p => { p.meta = Object.assign({}, DEFAULT_META, p.meta || {}); });
+  playlists.forEach(p => { p.meta = Object.assign({}, DEFAULT_META, p.meta || {}); if (p.type === 'file' && !p.fileName) p.fileName = p.name; });
 
   const plData = {};            // playlist id -> { raw, idx, info, ts }
   const plStatus = {};          // playlist id -> { n, info, err, warn }
@@ -1015,11 +1029,12 @@ body[data-theme="nordic"] {
      ===================================================================== */
   let video = $('video');          // `let`: the element is replaced when it keeps text tracks of the previous channel
   const box = $('video-box'), list = $('channel-list'), searchEl = $('search');
-  const statusEl = $('status'), noteEl = $('note'), detailsEl = $('details'), statsEl = $('stats'), dlg = $('settings');
+  const statusEl = $('status'), noteEl = $('note'), detailsEl = $('details'), recordTimecodeEl = $('record-timecode'), statsEl = $('stats'), dlg = $('settings');
   const selStream = $('sel-stream'), selQ = $('sel-quality'), selA = $('sel-audio'), selS = $('sel-subs');
   // Keep native controls stable: Firefox can recalculate native cue sizing when toggled on hover.
   video.controls = true;
   const btnBack = $('btn-back'), btnFwd = $('btn-fwd'), btnFav = $('btn-fav'), btnFs = $('btn-fs');
+  const btnRecord = $('btn-record');
 
   /* =====================================================================
      Playlist loading (cached in IndexedDB)
@@ -1377,6 +1392,104 @@ body[data-theme="nordic"] {
   let tried = new Set(), opts = {}, failInfo = { total: 0, geo: 0, last: null };
   let timer = null, playing = false, runPlayed = false, recordPending = false;
   let recoveries = 0, netRetries = 0, skipChain = 0, bitrate = 0, ignoreVol = false;
+  let mediaRecorder = null, recordStream = null, recordedChunks = [], recordingStartedAt = 0, recordingChannelName = '';
+  let recordingTimer = null, recordingUrl = null, recordFinalizing = false;
+  const recordFormats = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
+
+  function recordSupported() {
+    return !!((video.captureStream || video.mozCaptureStream) && typeof MediaRecorder !== 'undefined');
+  }
+  function updateRecordControls() {
+    const active = !!mediaRecorder && mediaRecorder.state === 'recording';
+    const supported = recordSupported();
+    btnRecord.hidden = !settings.dvrEnabled;
+    btnRecord.disabled = !supported || recordFinalizing;
+    btnRecord.classList.toggle('is-recording', active);
+    btnRecord.textContent = '● REC';
+    btnRecord.title = !supported ? 'Recording is not supported in this browser' : active ? 'Recording · click REC to stop and download' : recordFinalizing ? 'Preparing the recording download' : 'Record the current stream';
+    recordTimecodeEl.classList.toggle('is-visible', active);
+    if (active) {
+      // Display-only 25 fps timecode; the source stream's actual frame rate is not exposed here.
+      const totalFrames = Math.floor(Math.max(0, Date.now() - recordingStartedAt) * 25 / 1000);
+      const frames = totalFrames % 25;
+      const totalSeconds = Math.floor(totalFrames / 25);
+      const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+      const minutes = String(Math.floor(totalSeconds / 60) % 60).padStart(2, '0');
+      const seconds = String(totalSeconds % 60).padStart(2, '0');
+      recordTimecodeEl.textContent = hours + ':' + minutes + ':' + seconds + ':' + String(frames).padStart(2, '0');
+    }
+  }
+  function startRecording() {
+    if (!recordSupported()) {
+      btnRecord.title = 'Recording is not supported in this browser';
+      return;
+    }
+    if (!cur || video.readyState < 2) {
+      btnRecord.title = 'Start a channel and wait for video before recording';
+      return;
+    }
+    try {
+      const capture = video.captureStream || video.mozCaptureStream;
+      recordStream = capture.call(video);
+      if (!recordStream.getTracks().some(t => t.readyState === 'live')) throw new Error('The browser did not provide a live capture stream.');
+      const mimeType = recordFormats.find(type => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type));
+      mediaRecorder = mimeType ? new MediaRecorder(recordStream, { mimeType }) : new MediaRecorder(recordStream);
+      recordedChunks = [];
+      mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) recordedChunks.push(e.data); };
+      mediaRecorder.onerror = e => {
+        btnRecord.title = 'Recording error: ' + ((e.error && e.error.message) || 'stream capture failed');
+      };
+      mediaRecorder.onstop = () => {
+        clearInterval(recordingTimer); recordingTimer = null; recordFinalizing = false;
+        if (recordStream) { recordStream.getTracks().forEach(track => track.stop()); recordStream = null; }
+        const type = mediaRecorder && mediaRecorder.mimeType || 'video/webm';
+        const blob = new Blob(recordedChunks, { type });
+        recordedChunks = [];
+        if (recordingUrl) URL.revokeObjectURL(recordingUrl);
+        recordingUrl = blob.size ? URL.createObjectURL(blob) : null;
+        const ext = (type.match(/^video\/([a-z0-9.+-]+)/i) || [null, 'webm'])[1];
+        const safeName = (recordingChannelName || 'IPTV-recording').replace(/[^a-z0-9._-]+/gi, '_').replace(/^_+|_+$/g, '') || 'IPTV-recording';
+        const savedAt = new Date(recordingStartedAt);
+        const pad2 = n => String(n).padStart(2, '0');
+        const datePart = pad2(savedAt.getDate()) + '.' + pad2(savedAt.getMonth() + 1) + '.' + savedAt.getFullYear();
+        // Colons are invalid in Windows filenames, so use dashes between the local-time fields.
+        const timePart = pad2(savedAt.getHours()) + '-' + pad2(savedAt.getMinutes()) + '-' + pad2(savedAt.getSeconds());
+        const filename = safeName + '_' + datePart + '_' + timePart + '.' + ext;
+        mediaRecorder = null;
+        updateRecordControls();
+        if (recordingUrl) {
+          const link = document.createElement('a');
+          link.href = recordingUrl;
+          link.download = filename;
+          link.style.display = 'none';
+          document.body.append(link);
+          link.click();
+          link.remove();
+          btnRecord.title = 'Download started · ' + filename + ' · ' + (blob.size / 1024 / 1024).toFixed(1) + ' MB';
+          const urlToRevoke = recordingUrl;
+          setTimeout(() => URL.revokeObjectURL(urlToRevoke), 60000);
+        } else btnRecord.title = 'No recording data was received from this stream';
+      };
+      recordingStartedAt = Date.now();
+      recordingChannelName = cur.name || 'IPTV-recording';
+      mediaRecorder.start(1000);
+      recordingTimer = setInterval(updateRecordControls, 40);
+      updateRecordControls();
+    } catch (err) {
+      if (recordStream) { recordStream.getTracks().forEach(track => track.stop()); recordStream = null; }
+      mediaRecorder = null;
+      updateRecordControls();
+      btnRecord.title = 'Could not start recording: ' + (err.message || 'unsupported stream');
+    }
+  }
+  function stopRecording(reason) {
+    if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+    recordFinalizing = true;
+    clearInterval(recordingTimer); recordingTimer = null;
+    try { mediaRecorder.stop(); }
+    catch (err) { recordFinalizing = false; btnRecord.title = (reason ? reason + ' ' : '') + 'Could not finish recording: ' + err.message; }
+    updateRecordControls();
+  }
 
   /** Remove every subtitle / text track left on the <video> by the previous channel.
    *  Without this, the native CC menu keeps the old channel's subtitles until a page refresh. */
@@ -1397,6 +1510,7 @@ body[data-theme="nordic"] {
   }
 
   function teardown() {
+    if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording('Playback changed.');
     if (hls) {
       try { hls.subtitleDisplay = false; } catch (_) {}
       try { hls.destroy(); } catch (_) {}
@@ -1762,6 +1876,8 @@ body[data-theme="nordic"] {
   btnFav.onclick = () => { if (cur) toggleFav(cur); };
   $('btn-stats').onclick = toggleStats;
   btnFs.onclick = toggleFs;
+  btnRecord.onclick = () => { if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording(); else if (!recordFinalizing) startRecording(); };
+  updateRecordControls();
 
   /* =====================================================================
      Tabs and search
@@ -1862,18 +1978,56 @@ body[data-theme="nordic"] {
   const savePlaylists = () => store.set('playlists', playlists);
   const plMsg = t => { $('pl-msg').textContent = t; };
 
+  let renamingPlaylistId = null;
+  function startRenamePlaylist(p) {
+    renamingPlaylistId = p.id;
+    renderPlaylists();
+    const input = $('pl-name-edit');
+    input.focus(); input.select();
+  }
+  function savePlaylistName(p, value) {
+    const name = value.trim();
+    if (!name) { plMsg('Playlist name cannot be empty.'); $('pl-name-edit')?.focus(); return; }
+    p.name = name;
+    if (p.builtin) p.nameOverride = name;
+    renamingPlaylistId = null;
+    savePlaylists();
+    renderPlaylists();
+    rebuild();
+    plMsg('Playlist renamed.');
+  }
+  function cancelRenamePlaylist() {
+    renamingPlaylistId = null;
+    renderPlaylists();
+  }
+
   function renderPlaylists() {
     const boxEl = $('pl-list');
     boxEl.textContent = '';
     for (const p of playlists) {
       const st = plStatus[p.id] || {};
-      const info = h('div', { class: 'pl-info' }, h('b', { text: p.name }), h('small', { text: p.type === 'file' ? 'local file' : p.url }));
-      if (st.n != null) info.append(h('small', { text: st.n.toLocaleString('en') + ' entries · ' + st.info }));
+      const editing = renamingPlaylistId === p.id;
+      const source = p.type === 'file' ? 'Local file · ' + (p.fileName || p.name) : p.url;
+      const nameControl = editing
+        ? h('input', { id: 'pl-name-edit', class: 'pl-name-edit', type: 'text', value: p.name, 'aria-label': 'Playlist name', onkeydown: e => {
+            if (e.key === 'Enter') { e.preventDefault(); savePlaylistName(p, e.currentTarget.value); }
+            else if (e.key === 'Escape') { e.preventDefault(); cancelRenamePlaylist(); }
+          } })
+        : h('b', { text: p.name });
+      const info = h('div', { class: 'pl-info' }, nameControl, h('small', { text: source }));
+      if (st.n != null) {
+        const details = st.n.toLocaleString('en') + ' entries' + (p.type === 'file' || !st.info ? '' : ' · ' + st.info);
+        info.append(h('small', { text: details }));
+      }
       if (st.err) info.append(h('small', { class: 'err', text: '⚠ ' + st.err }));
       if (st.warn) info.append(h('small', { class: 'warn', text: '⚠ ' + st.warn }));
       boxEl.append(h('div', { class: 'pl-item' },
         h('input', { type: 'checkbox', checked: p.enabled, title: 'Enabled', onchange: e => { p.enabled = e.target.checked; savePlaylists(); reloadSoon(); } }),
         info,
+        editing
+          ? h('button', { class: 'btn', type: 'button', text: 'Save', onclick: () => savePlaylistName(p, $('pl-name-edit').value) })
+          : h('button', { class: 'btn', type: 'button', text: 'Rename', title: 'Change playlist name', onclick: () => startRenamePlaylist(p) }),
+        editing ? h('button', { class: 'btn', type: 'button', text: 'Cancel', onclick: cancelRenamePlaylist }) : null,
         h('button', { class: 'btn', type: 'button', text: 'Metadata', title: 'How countries and categories are read', onclick: () => { openMeta = openMeta === p.id ? null : p.id; renderPlaylists(); } }),
         p.builtin ? null : h('button', { class: 'btn', type: 'button', text: '🗑', title: 'Delete', onclick: () => deletePlaylist(p) })
       ));
@@ -2014,7 +2168,7 @@ body[data-theme="nordic"] {
     if (!raw.length) return plMsg('No channels found in “' + f.name + '”.');
     const id = 'f' + Date.now().toString(36);
     await idbSet('pl2:' + id, { ts: Date.now(), sig: '', raw, idx: {} });
-    const p = { id, name: f.name, type: 'file', enabled: true, meta: { ...DEFAULT_META } };
+    const p = { id, name: f.name, fileName: f.name, type: 'file', enabled: true, meta: { ...DEFAULT_META } };
     playlists.push(p);
     savePlaylists();
     openMeta = p.id;
@@ -2035,6 +2189,14 @@ body[data-theme="nordic"] {
   bindCheck('opt-hideGeo', 'hideGeo');
   bindCheck('opt-autoSkip', 'autoSkip');
   bindCheck('opt-autoResume', 'autoResume');
+  const dvrInput = $('opt-dvr');
+  dvrInput.checked = !!settings.dvrEnabled;
+  dvrInput.onchange = () => {
+    settings.dvrEnabled = dvrInput.checked;
+    saveSettings();
+    if (!settings.dvrEnabled && mediaRecorder && mediaRecorder.state === 'recording') stopRecording('DVR disabled.');
+    updateRecordControls();
+  };
   $('opt-merge').value = settings.merge;
   $('opt-merge').onchange = e => { settings.merge = e.target.value; saveSettings(); rebuild(); };
   $('opt-fs').value = settings.fsMode;
@@ -2107,4 +2269,5 @@ body[data-theme="nordic"] {
 </script>
 </body>
 </html>
+
 

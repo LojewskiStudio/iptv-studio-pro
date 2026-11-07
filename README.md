@@ -12,7 +12,8 @@ A single-file IPTV player for HLS streams and M3U/M3U8 playlists. It runs in a m
 
 
 **Demo:** https://lojewskistudio.github.io/iptv-studio-pro/ 
-<sub>(The online demo is provided for preview. For the best experience, download and open the HTML file locally.)</sub>
+
+<sub>The online demo is provided for preview. For the best experience, download and open the HTML file locally.</sub>
 
 
 ## Features

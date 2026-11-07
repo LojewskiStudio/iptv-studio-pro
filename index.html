@@ -1,23 +1,23 @@
 <!DOCTYPE html>
 <!--
-  IPTV Studio Player Pro (ver.01)
-  Single-file HLS/IPTV player. Open it in a browser tab - no server needed.
-
-  - Multiple M3U/M3U8 playlists (URL or local file), cached in IndexedDB
-  - Country / category extraction that you can configure per playlist
-  - Favorites, recent channels, playback history (Back / Forward), zapping
-  - Automatic fallback between streams of the same channel (same tvg-id)
-  - Quality, audio track and subtitle selection, stream statistics
-  - Manual browser recording with download (where supported)
-  - DVR (recorder)
-  - Keyboard navigation: arrows move a cursor, Enter plays
-
-  Requires hls.js (loaded from a CDN) for browsers without native HLS.
+  IPTV Studio Player Pro (ver. 01)
+Single-file HLS/IPTV player. Open it in a browser tab; no server required.
+- Multiple M3U/M3U8 playlists from URLs or local files, cached in IndexedDB
+- Configurable country and category extraction for each playlist
+- Favorites, recent channels, playback history (Back/Forward), and zapping
+- Automatic fallback to another stream for the same channel (same tvg-id)
+- Video quality, audio track, and subtitle selection
+- Stream statistics
+- Basic EPG (Now/Next)
+- DVR recording
+- Keyboard navigation: arrow keys move through the channel list; Enter plays the selected channel
 
   IPTV Studio Pro
+      Mihai Lucian Lojewski /nov. 2026
       Copyright (c) 2026 Lojewski Studio
       SPDX-License-Identifier: MIT
-      
+
+  *Requires hls.js (loaded from a CDN) for browsers without native HLS.   
   Licensed under the MIT License. See the LICENSE file in the repository root.
 -->
 <html lang="en">
@@ -43,7 +43,7 @@
   --card:#232323; --meta:#1f1f1f; --meta-line:#2f2f2f; --dlg:#1a1a1a; --dlg-line:#333;
   /* text */
   --ink:#fff; --muted:#8d8d8d; --title:#ff8800; --sig:#aedaf3; --cont:#a4ca95;
-  --accent:#ff8400; --tc: #ca0000;
+  --accent:#ff8400; --details: #999999; --epg: #e9a5d8; --tc: #ca0000;
   /* buttons / tabs / fields */
   --btn:#262626; --btn-h:#343434; --btn-ink:#98c5b4; --btn-line:#333; --btn-line-h:#444;
   --field:#1a1a1a; --field-line:#333;
@@ -69,7 +69,7 @@
 [hidden] { display:none !important; }
 html, body { height:100%; }
 body {
-  margin:0; display:flex; height:100vh; overflow:hidden;
+  margin: 0px;; display:flex; height:100vh; overflow:hidden;
   background:#000; color:var(--ink); accent-color:var(--accent);
   font:var(--fs)/1.35 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
 }
@@ -77,10 +77,10 @@ body {
 
 /* ---------- Player column ---------- */
 .left {
-  flex:1; min-width:0; display:flex; padding:14px; overflow-y:auto;
+  flex:1; min-width:0; display:flex; align-items:flex-start; padding:14px; overflow-y:auto;
   background:radial-gradient(ellipse at 50% 26%, var(--glow, var(--bg)) 0, var(--bg) 68%);
 }
-.player { position:relative; margin:auto; width:100%; max-width:950px; }
+.player { position:relative; margin:20px auto 0; width:100%; max-width:1200px; }
 .video-box { position:relative; background:#000; }
 video {
   display:block; width:100%; aspect-ratio:16/9; max-height:calc(100vh - 200px);
@@ -126,19 +126,23 @@ video {
 select { max-width:200px; }
 
 /* ---------- Channel info ---------- */
-.info { min-height:44px; margin-bottom:10px; flex-wrap:wrap; }
-.nowlogo { width:48px; height:46px; object-fit:contain; border-radius:4px; flex:none; }
-.now-text { min-width:0; flex:1 1 240px; }
+.info { display:grid; grid-template-columns:minmax(0,1fr) minmax(150px,42%); align-items:center; gap:0 12px; margin-bottom:10px; }
+.station-head { display:flex; align-items:center; gap:8px; min-width:0; min-height:46px; }
+.nowlogo { width:50px; height:50px; object-fit:contain; border-radius:2px; flex:none; }
+.now-text { min-width:0; flex:1; }
 .now-name { font-size:1.2em; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.now-meta { color:var(--muted); font-size:.85em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.detail-stack { display:flex; flex-direction:column; align-items:flex-end; gap:2px; margin-left:auto; text-align:right; white-space:nowrap; }
-.details { color:var(--muted); font-size:.75em; }
-.record-timecode { min-height:1.2em; color:var(--tc); font:600 .80em/1.2 ui-monospace,Consolas,monospace; letter-spacing:.08em; font-variant-numeric:tabular-nums; visibility:hidden; }
+.now-meta { color:var(--muted); font-size: .95em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top: -4px; }
+.info-side { display:grid; grid-column:2; grid-row:1; align-self:start; grid-template-rows:auto auto auto; align-content:start; justify-items:end; gap:2px; min-width:0; width:100%; text-align:right; }
+.info-side .status { max-width:100%; overflow:hidden; text-overflow:ellipsis; line-height:14px; }
+.epg-line { display:grid; gap:1px; max-width:100%; overflow:hidden; color:var(--epg); font-size:.75em; line-height:12px; text-align:right; }
+.epg-item { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.now-text .details { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--details); font-size:.64em; line-height:12px; }
+.record-timecode { min-height:0; color:var(--tc); font:600 .80em/14px ui-monospace,Consolas,monospace; letter-spacing:.08em; font-variant-numeric:tabular-nums; visibility:hidden; }
 .record-timecode.is-visible { visibility:visible; }
-.note { color:var(--warn-ink); font-size:.75em; }
+.player-notice { position:absolute; z-index:3; inset:50% auto auto 50%; transform:translate(-50%,-50%); max-width:min(90%,520px); padding:9px 13px; border:1px solid color-mix(in srgb, var(--warn-ink) 45%, transparent); border-radius:6px; background:rgba(10,10,10,.86); color:var(--warn-ink); font-size:.82em; line-height:1.4; text-align:center; box-shadow:0 2px 14px #0009; pointer-events:none; }
 
-.status, .badge { border-radius:999px; font-weight:600; white-space:nowrap; }
-.status { padding:3px 10px; font-size:.85em; background:var(--status); color:var(--status-ink); }
+.status, .badge { border-radius:5px; font-weight:600; white-space:nowrap; }
+.status { padding:2px 8px; font-size:.70em; background:var(--status); color:var(--status-ink); }
 .status.loading, .status.warning { background:var(--warn-bg); color:var(--warn-ink); }
 .status.error { background:var(--err-bg); color:var(--err-ink); }
 .status.geo   { background:var(--geo-bg); color:var(--geo-ink); }
@@ -229,7 +233,7 @@ dialog::backdrop { background:rgba(0,0,0,.75); }
 .dlg-head { display:flex; justify-content:space-between; align-items:center; }
 .dlg h2 { margin:0; color:var(--accent); }
 .dlg h3 { margin:20px 0 8px; font-size:1em; color:var(--group-ink); border-bottom:1px solid var(--dlg-line); padding-bottom:4px; }
-.pl-item { display:flex; gap:10px; align-items:center; padding:8px 10px; background:var(--card); border-radius:6px; margin-bottom:6px; }
+.pl-item { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:8px 10px; background:var(--card); border-radius:6px; margin-bottom:6px; }
 .pl-item input[type=checkbox], .opt input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent); flex:none; }
 .pl-info { flex:1; min-width:0; }
 .pl-name-edit { width:100%; min-width:0; padding:5px 7px; background:var(--field); color:var(--ink); border:1px solid var(--field-line); border-radius:5px; font:inherit; }
@@ -241,7 +245,12 @@ dialog::backdrop { background:rgba(0,0,0,.75); }
 .add { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; align-items:center; }
 .add input[type=text], .add input[type=url] { flex:1; min-width:150px; width:auto; }
 .hint { color:var(--muted); font-size:.85em; margin:6px 0 0; }
+.opt-hint { color:var(--muted); font-size:.82em; line-height:1.4; margin:-3px 0 10px 26px; max-width:62em; }
 .opt { display:flex; align-items:center; gap:8px; margin:7px 0; }
+.opt-url { align-items:flex-start; flex-wrap:wrap; }
+.opt-url input[type=url] { flex:1 1 100%; min-width:0; margin-left:24px; }
+.epg-editor .opt-url input[type=file] { flex:1 1 100%; min-width:0; margin:4px 0 0 24px; color:var(--muted); font:inherit; font-size:.78em; }
+.epg-file-name, .epg-help { display:block; margin:4px 0 0 26px; color:var(--muted); overflow-wrap:anywhere; }
 .opt input[type=number] { width:90px; padding:6px 8px; font-size:1em; }
 .meta { margin:-2px 0 10px 26px; padding:12px; background:var(--meta); border:1px solid var(--meta-line); border-radius:6px; }
 .mrow { display:grid; grid-template-columns:150px 1fr; gap:4px 10px; align-items:center; margin-bottom:8px; }
@@ -260,14 +269,25 @@ kbd { padding:1px 7px; font:12px ui-monospace,Consolas,monospace; cursor:default
 @media (max-width:800px) {
   body { flex-direction:column; height:auto; overflow:auto; }
   .left { padding:10px; overflow:visible; }
-  .player { margin:0 auto; }
+  .player { margin:20px auto 0; }
   .stats { position:static; max-height:min(30vh,180px); box-shadow:none; }
   video { max-height:none; }
   .right { width:100%; height:75vh; border-left:0; }
   .mrow { grid-template-columns:1fr; }
   .mrow small { grid-column:1; }
 }
-@media (max-width:520px) { .stats { grid-template-columns:minmax(0,1fr); } }
+@media (max-width:520px) {
+  .stats { grid-template-columns:minmax(0,1fr); }
+  .info { grid-template-columns:minmax(0,1fr) minmax(112px,44%); gap:0 7px; }
+  .station-head { gap:5px; }
+  .nowlogo { width:40px; height:40px; }
+  .now-name { font-size:1.02em; }
+  .now-meta { font-size:.72em; }
+  .info-side .status { font-size:.68em; padding:1px 3px; }
+  .epg-line { max-width:100%; font-size:.66em; line-height:12px; }
+  .now-text .details { font-size:.66em; line-height:12px; }
+  .record-timecode { font-size:.72em; line-height:14px; letter-spacing:.06em; }
+}
 
 
 /* =========================================================
@@ -310,7 +330,7 @@ body[data-theme="stendhal" i] {
   --warn-bg:#332326; --warn-ink:#e2a0a7; --err-bg:#471d24; --err-ink:#ff9ba5;
   --geo-bg:#302326; --geo-ink:#d0bfc2; --multi-bg:#302326; --multi-ink:#d0bfc2;
   --card:#21171b; --meta:#1c1418; --meta-line:#3a292f; --dlg:#171115; --dlg-line:#58343e;
-  --stat-bg:#100c0f; --stat-val:#d7b0c2; --pre-ink:#d7c6cb;
+  --stat-bg:#100c0f; --stat-val:#d7b0c2; --pre-ink:#d7c6cb; --epg: #cfa5a5; --details: #bd8989;
   font-family: Verdana, Geneva, Tahoma, sans-serif;
 }
 
@@ -385,18 +405,24 @@ body[data-theme="nordic"] {
   <div class="player">
     <!-- Current station information sits above the video. -->
     <div class="row info">
-      <img class="nowlogo" id="now-logo" alt="" hidden>
-      <div class="now-text">
-        <div class="now-name" id="now-name">Select a channel</div>
-        <div class="now-meta" id="now-meta"></div>
+      <div class="station-head">
+        <img class="nowlogo" id="now-logo" alt="" hidden>
+        <div class="now-text">
+          <div class="now-name" id="now-name">Select a channel</div>
+          <div class="now-meta" id="now-meta"></div>
+          <div class="details" id="details"></div>
+        </div>
       </div>
-      <span class="status" id="status" hidden></span>
-      <span class="note" id="note" hidden></span>
-      <div class="detail-stack"><span class="details" id="details"></span><span class="record-timecode" id="record-timecode">00:00:00:00</span></div>
+      <div class="info-side">
+        <span class="status" id="status"></span>
+        <span class="epg-line" id="epg-line" aria-live="polite" hidden></span>
+      <span class="record-timecode" id="record-timecode">REC: 00:00:00:00</span>
+      </div>
     </div>
 
     <div class="video-box" id="video-box">
       <video id="video" playsinline></video>
+      <div class="player-notice" id="note" role="status" aria-live="polite" hidden></div>
       <div class="overlay" id="overlay">
         <div class="ov-name" id="ov-name"></div>
         <div class="ov-status" id="ov-status"></div>
@@ -419,7 +445,6 @@ body[data-theme="nordic"] {
         <select id="sel-audio" title="Audio track" hidden></select>
         <select id="sel-subs" title="Subtitles" hidden></select>
         <span class="control-spacer"></span>
-        <button class="btn" id="btn-fs" title="Fullscreen with status overlay (F)" hidden>⛶</button>
         <button class="btn record" id="btn-record" title="Record the current stream">● REC</button>
         <button class="btn" id="btn-stats" title="Stream statistics (I)">Info</button>
         <button class="btn" id="btn-fav" title="Add to favorites (S)">☆ Favorite</button>
@@ -499,16 +524,12 @@ body[data-theme="nordic"] {
     <label class="opt"><input type="checkbox" id="opt-hideGeo"> Hide channels marked “Geo-blocked”</label>
     <label class="opt"><input type="checkbox" id="opt-autoSkip"> When a channel fails, jump to the next one automatically</label>
     <label class="opt"><input type="checkbox" id="opt-autoResume"> Resume the last channel on start</label>
+    <label class="opt"><input type="checkbox" id="opt-epg"> Enable EPG in the app</label>
     <label class="opt"><input type="checkbox" id="opt-dvr"> Enable DVR recording</label>
+    <p class="opt-hint">*Recording may not work on every device or stream. Keep the app page open while recording!</p>
     <label class="opt" for="opt-history-max">Playback history limit:
       <input type="number" id="opt-history-max" min="1" max="1000" step="1" inputmode="numeric">
       <span>channels</span>
-    </label>
-    <label class="opt">Fullscreen:
-      <select id="opt-fs">
-        <option value="native">Native button (video only, no status overlay)</option>
-        <option value="app">App fullscreen (status overlay, ↑/↓ zap) - Chrome/Edge</option>
-      </select>
     </label>
     <label class="opt">Text size:
       <select id="opt-font">
@@ -835,7 +856,7 @@ body[data-theme="nordic"] {
 
     return {
       name: raw.name, url: raw.url, logo: raw.logo, id: raw.id, countries, cats,
-      source: p.name, geo: /geo-?blocked/i.test(raw.name)
+      source: p.name, playlistId: p.id, geo: /geo-?blocked/i.test(raw.name)
     };
   }
 
@@ -854,9 +875,11 @@ body[data-theme="nordic"] {
      State
      ===================================================================== */
   let settings = Object.assign(
-    { hideDead: true, hideGeo: false, autoSkip: false, autoResume: true, fontSize: 'm', merge: 'id', fsMode: 'native', historyMax: HISTORY_DEFAULT, theme: 'Stendhal', dvrEnabled: true },
+    { hideDead: true, hideGeo: false, autoSkip: false, autoResume: true, fontSize: 'm', merge: 'id', historyMax: HISTORY_DEFAULT, theme: 'Stendhal', dvrEnabled: true, epgEnabled: false },
     store.get('settings', {})
   );
+  delete settings.fsMode;
+  delete settings.epgUrl;
   settings.historyMax = Math.max(HISTORY_MIN, Math.min(HISTORY_LIMIT, Math.floor(Number(settings.historyMax) || HISTORY_DEFAULT)));
   const storedLogoModes = settings.logoModes && typeof settings.logoModes === 'object' ? settings.logoModes : {};
   const hasPerThemeLogoModes = Object.values(storedLogoModes).some(v => v && typeof v === 'object' && !Array.isArray(v));
@@ -934,7 +957,13 @@ body[data-theme="nordic"] {
     if (!p) playlists.push({ ...def });
     else { p.name = p.nameOverride || def.name; p.builtin = true; for (const k in def) if (p[k] === undefined) p[k] = def[k]; }
   }
-  playlists.forEach(p => { p.meta = Object.assign({}, DEFAULT_META, p.meta || {}); if (p.type === 'file' && !p.fileName) p.fileName = p.name; });
+  playlists.forEach(p => {
+    p.meta = Object.assign({}, DEFAULT_META, p.meta || {});
+    if (p.type === 'file' && !p.fileName) p.fileName = p.name;
+    p.epgEnabled = !!p.epgEnabled;
+    p.epgUrl = typeof p.epgUrl === 'string' ? p.epgUrl : '';
+    p.epgFileName = typeof p.epgFileName === 'string' ? p.epgFileName : '';
+  });
 
   const plData = {};            // playlist id -> { raw, idx, info, ts }
   const plStatus = {};          // playlist id -> { n, info, err, warn }
@@ -954,6 +983,7 @@ body[data-theme="nordic"] {
   let shown = [];               // channels currently displayed (zap list)
   let loadToken = 0;
   let openMeta = null;
+  let openEpg = null;
 
   /** Channel shape: { uid, name, logo, id, countries[], cats[], sources[], geo, streams:[{url,source,name,quality,geo}] } */
   function quality(n) {
@@ -999,7 +1029,7 @@ body[data-theme="nordic"] {
     for (const e of entries) {
       if (!e.url || seen.has(e.url)) continue;       // the same stream URL is never listed twice
       seen.add(e.url);
-      const stream = { url: e.url, source: e.source, name: e.name, quality: quality(e.name), geo: e.geo };
+      const stream = { url: e.url, source: e.source, playlistId: e.playlistId, id: e.id, name: e.name, quality: quality(e.name), geo: e.geo };
       const key = settings.merge === 'id' ? canonId(e.id) : '';   // merge ONLY on identical tvg-id, never on name
       let ch = key ? byId.get(key) : null;
       if (!ch) {
@@ -1029,11 +1059,11 @@ body[data-theme="nordic"] {
      ===================================================================== */
   let video = $('video');          // `let`: the element is replaced when it keeps text tracks of the previous channel
   const box = $('video-box'), list = $('channel-list'), searchEl = $('search');
-  const statusEl = $('status'), noteEl = $('note'), detailsEl = $('details'), recordTimecodeEl = $('record-timecode'), statsEl = $('stats'), dlg = $('settings');
+  const statusEl = $('status'), noteEl = $('note'), detailsEl = $('details'), epgLineEl = $('epg-line'), recordTimecodeEl = $('record-timecode'), statsEl = $('stats'), dlg = $('settings');
   const selStream = $('sel-stream'), selQ = $('sel-quality'), selA = $('sel-audio'), selS = $('sel-subs');
   // Keep native controls stable: Firefox can recalculate native cue sizing when toggled on hover.
   video.controls = true;
-  const btnBack = $('btn-back'), btnFwd = $('btn-fwd'), btnFav = $('btn-fav'), btnFs = $('btn-fs');
+  const btnBack = $('btn-back'), btnFwd = $('btn-fwd'), btnFav = $('btn-fav');
   const btnRecord = $('btn-record');
 
   /* =====================================================================
@@ -1360,7 +1390,7 @@ body[data-theme="nordic"] {
   /* =====================================================================
      Status, notes, overlay
      ===================================================================== */
-  let nameTimer = null;
+  let nameTimer = null, noteTimer = null;
   const inAppFs = () => document.fullscreenElement === box;
 
   function setStatus(kind, text, detail) {
@@ -1368,9 +1398,15 @@ body[data-theme="nordic"] {
     statusEl.textContent = text || '';
     statusEl.title = detail || '';
     statusEl.hidden = !text;
+    epgLineEl.hidden = !settings.epgEnabled || !!text || !epgLineEl.textContent;
     updateOverlay();
   }
-  function setNote(text) { noteEl.textContent = text || ''; noteEl.hidden = !text; }
+  function setNote(text) {
+    clearTimeout(noteTimer);
+    noteEl.textContent = text || '';
+    noteEl.hidden = !text;
+    if (text) noteTimer = setTimeout(() => { noteEl.hidden = true; }, 8000);
+  }
   function updateOverlay() {
     box.classList.toggle('fs', inAppFs());
     const ov = $('ov-status');
@@ -1416,7 +1452,7 @@ body[data-theme="nordic"] {
       const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
       const minutes = String(Math.floor(totalSeconds / 60) % 60).padStart(2, '0');
       const seconds = String(totalSeconds % 60).padStart(2, '0');
-      recordTimecodeEl.textContent = hours + ':' + minutes + ':' + seconds + ':' + String(frames).padStart(2, '0');
+      recordTimecodeEl.textContent = 'REC: ' + hours + ':' + minutes + ':' + seconds + ':' + String(frames).padStart(2, '0');
     }
   }
   function startRecording() {
@@ -1588,6 +1624,7 @@ body[data-theme="nordic"] {
     const a = ++attempt;
 
     curStream = stream; bitrate = 0; playing = false; recoveries = 0; netRetries = 0;
+    updateEpg();
     clearTimeout(timer);
     teardown();
     setStatus('loading', tried.size > 1 ? 'Trying backup stream…' : 'Connecting…');
@@ -1681,7 +1718,7 @@ body[data-theme="nordic"] {
   /** All listeners of the <video> element. Called again whenever the element is recreated. */
   function bindVideo(v) {
   const on = (ev, fn) => v.addEventListener(ev, e => { if (v === video) fn(e); });   // ignore events of a replaced element
-  on('dblclick', e => { if (settings.fsMode === 'app') { e.preventDefault(); toggleFs(); } });
+  on('dblclick', e => { e.preventDefault(); toggleFs(); });
   on('playing', () => {
     if (!curStream) return;
     clearTimeout(timer);
@@ -1730,6 +1767,135 @@ body[data-theme="nordic"] {
     detailsEl.title = 'Resolution comes from the decoded video. The bitrate is the HLS variant bitrate, not measured throughput.';
   }
 
+  /* ---------- Lightweight Now / Next EPG ---------- */
+  let epgCache = null, epgLocalGuide = null, epgRequestToken = 0, epgRefreshTimer = null, epgAbortController = null;
+  const EPG_MAX_BYTES = 32 * 1024 * 1024;
+  let epgInfoMessage = '';
+  function epgMessage(text, isGuide = false) {
+    epgInfoMessage = isGuide ? '' : (text || '');
+    const lines = isGuide && text ? String(text).split('\n').filter(Boolean) : [];
+    epgLineEl.replaceChildren(...lines.map(line => h('span', { class: 'epg-item', text: line })));
+    epgLineEl.hidden = !settings.epgEnabled || !!statusEl.textContent || !isGuide || !text;
+    if (!statsEl.hidden) updateStats();
+  }
+  async function readEpgStream(stream) {
+      if (!stream) throw new Error('Streaming response is unavailable');
+      const reader = stream.getReader(), decoder = new TextDecoder();
+      const parts = []; let bytes = 0;
+      while (true) {
+        const part = await reader.read();
+        if (part.done) break;
+        bytes += part.value.byteLength;
+        if (bytes > EPG_MAX_BYTES) { await reader.cancel(); throw new Error('EPG file is larger than 32 MB'); }
+        parts.push(decoder.decode(part.value, { stream: true }));
+      }
+      parts.push(decoder.decode());
+      const text = parts.join('');
+      if (!/<tv\b/i.test(text)) throw new Error('The URL did not return an XMLTV guide');
+      return text;
+  }
+  async function loadEpgXml(url) {
+    if (epgCache && epgCache.url === url && Date.now() - epgCache.loadedAt < 30 * 60 * 1000) return epgCache.text;
+    const controller = new AbortController();
+    epgAbortController = controller;
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    try {
+      const response = await fetch(url, { signal: controller.signal, cache: 'no-cache' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      let stream = response.body;
+      const path = new URL(url, location.href).pathname;
+      const httpCompressed = /gzip/i.test(response.headers.get('content-encoding') || '');
+      if (/\.gz$/i.test(path) && !httpCompressed) {
+        if (typeof DecompressionStream !== 'function') throw new Error('This browser cannot open a .gz EPG file');
+        stream = stream.pipeThrough(new DecompressionStream('gzip'));
+      }
+      const text = await readEpgStream(stream);
+      epgCache = { url, text, loadedAt: Date.now() };
+      return text;
+    } finally {
+      clearTimeout(timeout);
+      if (epgAbortController === controller) epgAbortController = null;
+    }
+  }
+  async function readLocalEpgFile(file, fileName = file.name || 'guide.xml') {
+    let stream = file.stream();
+    if (/\.gz$/i.test(fileName)) {
+      if (typeof DecompressionStream !== 'function') throw new Error('This browser cannot open a .gz EPG file');
+      stream = stream.pipeThrough(new DecompressionStream('gzip'));
+    }
+    return readEpgStream(stream);
+  }
+  async function loadPlaylistEpg(p) {
+    if (p.epgUrl) return loadEpgXml(p.epgUrl);
+    if (!p.epgFileName) throw new Error('Choose an EPG file for this playlist');
+    if (epgLocalGuide && epgLocalGuide.playlistId === p.id) return epgLocalGuide.text;
+    const saved = await idbGet('epg:' + p.id);
+    if (!saved || !saved.blob) throw new Error('Choose the local EPG file again');
+    const text = await readLocalEpgFile(saved.blob, saved.name || p.epgFileName);
+    epgLocalGuide = { playlistId: p.id, text };
+    return text;
+  }
+  function xmltvTime(value) {
+    const m = String(value || '').match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2}))?/);
+    if (!m) return NaN;
+    const parts = m.slice(1, 7).map(Number);
+    let time = Date.UTC(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]);
+    if (m[7]) time -= (m[7] === '+' ? 1 : -1) * (Number(m[8]) * 60 + Number(m[9])) * 60000;
+    else time = new Date(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]).getTime();
+    return time;
+  }
+  function findEpgSchedule(xml, channelId) {
+    const re = /<programme\b([^>]*)>([\s\S]*?)<\/programme\s*>/gi;
+    const results = []; let m;
+    while ((m = re.exec(xml))) {
+      const a = m[1].match(/\bchannel\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+      if (!a || (a[1] || a[2]) !== channelId) continue;
+      const doc = new DOMParser().parseFromString(m[0], 'application/xml');
+      const p = doc.documentElement;
+      const start = xmltvTime(p.getAttribute('start')), stop = xmltvTime(p.getAttribute('stop'));
+      const title = p.querySelector('title');
+      if (Number.isFinite(start) && Number.isFinite(stop) && title && title.textContent.trim()) {
+        results.push({ start, stop, title: title.textContent.trim() });
+      }
+    }
+    return results.sort((a, b) => a.start - b.start);
+  }
+  async function updateEpg() {
+    if (epgAbortController) { epgAbortController.abort(); epgAbortController = null; }
+    const token = ++epgRequestToken;
+    clearTimeout(epgRefreshTimer); epgRefreshTimer = null;
+    if (!settings.epgEnabled || !cur || !curStream) { epgMessage(''); return; }
+    const playlistId = curStream.playlistId;
+    const playlist = playlists.find(p => p.id === playlistId);
+    if (!playlist || !playlist.enabled || !playlist.epgEnabled) { epgMessage(''); return; }
+    if (!playlist.epgUrl && !playlist.epgFileName) { epgMessage('Set an EPG source for this playlist'); return; }
+    const channelId = String(curStream.id || cur.id || '').trim();
+    if (!channelId) { epgMessage('EPG needs a tvg-id for this channel'); return; }
+    epgMessage('Loading EPG…');
+    try {
+      const xml = await loadPlaylistEpg(playlist);
+      if (token !== epgRequestToken || !settings.epgEnabled || !cur || !curStream || curStream.playlistId !== playlistId || String(curStream.id || cur.id || '').trim() !== channelId) return;
+      const programmes = findEpgSchedule(xml, channelId);
+      const now = Date.now();
+      const current = programmes.find(p => p.start <= now && now < p.stop);
+      const next = programmes.find(p => p.start >= (current ? current.stop : now));
+      const clock = n => Number.isFinite(n) ? new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(n)) : '';
+      const lines = [];
+      if (current) lines.push('NOW ' + clock(current.start) + ' · ' + current.title);
+      if (next) lines.push('NEXT ' + clock(next.start) + ' · ' + next.title);
+      if (lines.length) epgMessage(lines.join('\n'), true);
+      else epgMessage('No programme data available for this channel');
+      const boundary = current ? current.stop : next && next.start;
+      if (boundary && boundary > now) epgRefreshTimer = setTimeout(updateEpg, Math.min(boundary - now + 1000, 6 * 60 * 60 * 1000));
+    } catch (err) {
+      if (token !== epgRequestToken) return;
+      const message = err && err.name === 'AbortError' ? 'EPG request timed out'
+        : err instanceof TypeError ? 'EPG unavailable (network/CORS)'
+          : (err && err.message || 'EPG unavailable');
+      epgMessage(message);
+    }
+  }
+
   let statsTimer = null;
   function toggleStats() {
     statsEl.hidden = !statsEl.hidden;
@@ -1738,6 +1904,7 @@ body[data-theme="nordic"] {
   }
   function updateStats() {
     const L = [['Channel', cur ? cur.name : '—'], ['Resolution', video.videoWidth ? video.videoWidth + '×' + video.videoHeight : '—']];
+    if (settings.epgEnabled && epgInfoMessage) L.push(['EPG', epgInfoMessage]);
     if (curStream) L.push(['Source', curStream.source + (cur.streams.length > 1 ? ' (stream ' + (cur.streams.indexOf(curStream) + 1) + ' of ' + cur.streams.length + ')' : '')]);
     if (hls) {
       const lv = hls.levels && hls.levels[hls.currentLevel];
@@ -1857,14 +2024,11 @@ body[data-theme="nordic"] {
 
   /* ---------- Fullscreen ---------- */
   function applyFsMode() {
-    const app = settings.fsMode === 'app';
-    if (app) video.setAttribute('controlslist', 'nofullscreen'); else video.removeAttribute('controlslist');
-    btnFs.hidden = !app;
+    video.removeAttribute('controlslist');
   }
   function toggleFs() {
     if (document.fullscreenElement) { document.exitFullscreen(); return; }
-    const target = settings.fsMode === 'app' ? box : video;
-    if (target.requestFullscreen) target.requestFullscreen().catch(() => {});
+    if (video.requestFullscreen) video.requestFullscreen().catch(() => {});
   }
   document.addEventListener('fullscreenchange', () => { updateOverlay(); if (inAppFs() && cur) flashName(); });
 
@@ -1875,7 +2039,6 @@ body[data-theme="nordic"] {
   btnFwd.onclick = () => goHistory(1);
   btnFav.onclick = () => { if (cur) toggleFav(cur); };
   $('btn-stats').onclick = toggleStats;
-  btnFs.onclick = toggleFs;
   btnRecord.onclick = () => { if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording(); else if (!recordFinalizing) startRecording(); };
   updateRecordControls();
 
@@ -2019,6 +2182,10 @@ body[data-theme="nordic"] {
         const details = st.n.toLocaleString('en') + ' entries' + (p.type === 'file' || !st.info ? '' : ' · ' + st.info);
         info.append(h('small', { text: details }));
       }
+      if (p.epgEnabled || p.epgUrl || p.epgFileName) {
+        const epgSource = p.epgFileName || p.epgUrl || 'source not set';
+        info.append(h('small', { text: 'EPG ' + (p.epgEnabled ? 'enabled' : 'disabled') + ' · ' + epgSource }));
+      }
       if (st.err) info.append(h('small', { class: 'err', text: '⚠ ' + st.err }));
       if (st.warn) info.append(h('small', { class: 'warn', text: '⚠ ' + st.warn }));
       boxEl.append(h('div', { class: 'pl-item' },
@@ -2028,19 +2195,92 @@ body[data-theme="nordic"] {
           ? h('button', { class: 'btn', type: 'button', text: 'Save', onclick: () => savePlaylistName(p, $('pl-name-edit').value) })
           : h('button', { class: 'btn', type: 'button', text: 'Rename', title: 'Change playlist name', onclick: () => startRenamePlaylist(p) }),
         editing ? h('button', { class: 'btn', type: 'button', text: 'Cancel', onclick: cancelRenamePlaylist }) : null,
-        h('button', { class: 'btn', type: 'button', text: 'Metadata', title: 'How countries and categories are read', onclick: () => { openMeta = openMeta === p.id ? null : p.id; renderPlaylists(); } }),
+        h('button', { class: 'btn', type: 'button', text: p.epgEnabled ? 'EPG ✓' : 'EPG', title: 'Configure this playlist’s EPG source', onclick: () => { openEpg = openEpg === p.id ? null : p.id; openMeta = null; renderPlaylists(); } }),
+        h('button', { class: 'btn', type: 'button', text: 'Metadata', title: 'How countries and categories are read', onclick: () => { openMeta = openMeta === p.id ? null : p.id; openEpg = null; renderPlaylists(); } }),
         p.builtin ? null : h('button', { class: 'btn', type: 'button', text: '🗑', title: 'Delete', onclick: () => deletePlaylist(p) })
       ));
       if (openMeta === p.id) boxEl.append(metaEditor(p));
+      if (openEpg === p.id) boxEl.append(epgEditor(p));
     }
   }
 
+  function epgEditor(p) {
+    const editor = h('div', { class: 'meta epg-editor' });
+    const fileState = h('small', { class: 'epg-file-name', text: p.epgFileName ? 'Saved local guide: ' + p.epgFileName : 'No local guide file selected.' });
+    const urlInput = h('input', { type: 'url', value: p.epgUrl || '', placeholder: 'https://example.com/guide.xml' });
+    const fileInput = h('input', { type: 'file', accept: '.xml,.gz,.xml.gz,application/xml,text/xml,application/gzip' });
+    let filePickToken = 0;
+    editor.append(
+      h('label', { class: 'opt' }, h('input', { type: 'checkbox', checked: !!p.epgEnabled, onchange: e => {
+        p.epgEnabled = e.target.checked;
+        savePlaylists();
+        renderPlaylists();
+        if (curStream && curStream.playlistId === p.id) updateEpg();
+      } }), ' Enable EPG for this playlist'),
+      h('label', { class: 'opt opt-url' }, 'XMLTV guide URL', urlInput),
+      h('label', { class: 'opt opt-url' }, 'Downloaded XMLTV file', fileInput),
+      fileState,
+      h('small', { class: 'epg-help', text: 'Choose a URL or a local .xml / .xml.gz file. Online sources must allow browser access (CORS). Programmes match by tvg-id.' })
+    );
+    urlInput.onchange = () => {
+      const value = urlInput.value.trim();
+      if (value) {
+        try {
+          const url = new URL(value);
+          if (!/^https?:$/.test(url.protocol)) throw new Error('protocol');
+        } catch (_) {
+          urlInput.setCustomValidity('Enter a valid http:// or https:// XMLTV URL.');
+          urlInput.reportValidity();
+          return;
+        }
+      }
+      urlInput.setCustomValidity('');
+      filePickToken++;
+      p.epgUrl = value;
+      if (value) {
+        p.epgFileName = '';
+        fileInput.value = '';
+        fileState.textContent = 'Using the online XMLTV URL.';
+        epgLocalGuide = null;
+        idbDel('epg:' + p.id);
+      } else fileState.textContent = p.epgFileName ? 'Saved local guide: ' + p.epgFileName : 'No local guide file selected.';
+      savePlaylists();
+      renderPlaylists();
+      if (curStream && curStream.playlistId === p.id) updateEpg();
+    };
+    fileInput.onchange = async () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      const token = ++filePickToken;
+      fileState.textContent = 'Loading local guide…';
+      try {
+        const text = await readLocalEpgFile(file);
+        if (token !== filePickToken) return;
+        await idbSet('epg:' + p.id, { blob: file, name: file.name, lastModified: file.lastModified });
+        p.epgUrl = '';
+        p.epgFileName = file.name;
+        urlInput.value = '';
+        epgLocalGuide = { playlistId: p.id, text };
+        savePlaylists();
+        renderPlaylists();
+        if (curStream && curStream.playlistId === p.id) updateEpg();
+      } catch (err) {
+        if (token === filePickToken) fileState.textContent = 'Could not load EPG file: ' + (err && err.message || 'invalid XMLTV file');
+      }
+    };
+    return editor;
+  }
+
   function deletePlaylist(p) {
+    const wasCurrentSource = !!curStream && curStream.playlistId === p.id;
     playlists = playlists.filter(x => x !== p);
     delete plData[p.id]; delete plStatus[p.id];
     idbDel('pl2:' + p.id);
+    idbDel('epg:' + p.id);
     if (openMeta === p.id) openMeta = null;
+    if (openEpg === p.id) openEpg = null;
     savePlaylists(); renderPlaylists(); reloadSoon();
+    if (wasCurrentSource) updateEpg();
   }
 
   /** Text report that shows what the playlist really contains and how it is being interpreted. */
@@ -2197,10 +2437,15 @@ body[data-theme="nordic"] {
     if (!settings.dvrEnabled && mediaRecorder && mediaRecorder.state === 'recording') stopRecording('DVR disabled.');
     updateRecordControls();
   };
+  const epgInput = $('opt-epg');
+  epgInput.checked = !!settings.epgEnabled;
+  epgInput.onchange = () => {
+    settings.epgEnabled = epgInput.checked;
+    saveSettings();
+    updateEpg();
+  };
   $('opt-merge').value = settings.merge;
   $('opt-merge').onchange = e => { settings.merge = e.target.value; saveSettings(); rebuild(); };
-  $('opt-fs').value = settings.fsMode;
-  $('opt-fs').onchange = e => { settings.fsMode = e.target.value; saveSettings(); applyFsMode(); };
   $('opt-font').value = settings.fontSize;
   $('opt-font').onchange = e => { settings.fontSize = e.target.value; saveSettings(); applyFont(); };
   const historyMaxInput = $('opt-history-max');

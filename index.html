@@ -19,6 +19,11 @@ Single-file HLS/IPTV player. Open it in a browser tab; no server required.
 
   *Requires hls.js (loaded from a CDN) for browsers without native HLS.   
   Licensed under the MIT License. See the LICENSE file in the repository root.
+
+  Performance pass (nov. 2026): EPG indexed once in a Web Worker (no per-zap XML scans),
+  logo-backdrop results persisted in IndexedDB and probed through a small queue, cached list
+  grouping, O(1) row lookup and cursor movement, lighter REC timecode and REC glow,
+  content-visibility on channel rows, hls.js buffer cap, non-blocking hls.js load.
 -->
 <html lang="en">
 <head>
@@ -26,7 +31,7 @@ Single-file HLS/IPTV player. Open it in a browser tab; no server required.
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Single-file IPTV player: HLS, multiple playlists, favorites, no server required.">
 <title>IPTV Studio Player</title>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <style>
  /* =========================================================
    IPTV Studio Player - styles
@@ -69,7 +74,7 @@ Single-file HLS/IPTV player. Open it in a browser tab; no server required.
 [hidden] { display:none !important; }
 html, body { height:100%; }
 body {
-  margin: 0px;; display:flex; height:100vh; overflow:hidden;
+  margin: 0px; display:flex; height:100vh; overflow:hidden;
   background:#000; color:var(--ink); accent-color:var(--accent);
   font:var(--fs)/1.35 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
 }
@@ -116,11 +121,17 @@ video {
   background:var(--btn-h); color:var(--btn-hi, var(--accent)); border-color:var(--btn-line-h);
 }
 .btn:disabled { opacity:.38; cursor:not-allowed; }
-.btn.record { color:var(--muted); border-color:var(--btn-line); background:var(--btn); }
+.btn.record { position:relative; isolation:isolate; color:var(--muted); border-color:var(--btn-line); background:var(--btn); }
 .btn.record:hover:not(:disabled) { color:var(--btn-hi, var(--accent)); border-color:var(--btn-line-h); background:var(--btn-h); }
-.btn.record.is-recording { color:#fff; border-color:#ef6268; background:#a82e38; box-shadow:0 0 11px #e0444b66; animation:record-glow 1.4s ease-in-out infinite; }
-@keyframes record-glow { 50% { background:#c33b45; box-shadow:0 0 16px #e0444b99; } }
-@media (prefers-reduced-motion: reduce) { .btn.record.is-recording { animation:none; } }
+.btn.record.is-recording { color:#fff; border-color:#ef6268; background:#a82e38; box-shadow:0 0 11px #e0444b66; }
+/* The pulse animates only opacity of a pseudo-element (compositor-friendly), not box-shadow/background */
+.btn.record.is-recording::after {
+  content:""; position:absolute; inset:-1px; z-index:-1; border-radius:inherit; pointer-events:none;
+  background:#c33b45; box-shadow:0 0 16px #e0444b99; opacity:0;
+  animation:record-glow 1.4s ease-in-out infinite;
+}
+@keyframes record-glow { 50% { opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .btn.record.is-recording::after { animation:none; } }
 .btn.on { color:var(--on); border-color:var(--on-line); }
 .btn:focus-visible, select:focus-visible, .tab:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 select { max-width:200px; }
@@ -198,6 +209,8 @@ li.row {
   display:flex; align-items:center; gap:10px; padding:7px 10px; margin-bottom:4px;
   border-radius:6px; background:var(--item); cursor:pointer; transition:background .12s; outline:0;
 }
+/* Off-screen channel rows skip layout and paint work (long lists) */
+li.row.channel { content-visibility:auto; contain-intrinsic-size:auto 50px; }
 li.row:hover { background:var(--item-h); }
 li.row:focus { background:var(--item-h); box-shadow:inset 0 0 0 2px var(--accent); }
 li.row.active { background:var(--active); color:var(--active-ink); font-weight:700; box-shadow:inset 3px 0 0 var(--active-bar); }
@@ -315,7 +328,7 @@ body[data-theme="aurora"] {
   --logo-bg:#10231e; --logo-dark:#07110e; --logo-light:#f1f4ed;
   --status:#18352c; --status-ink:#bff0e0;
   --card:#0f221c; --meta:#0c1e19; --meta-line:#1d3d33; --dlg:#0a1a16; --dlg-line:#285244;
-  --stat-bg:#07130f; --stat-val:#7fd9bd;
+  --stat-bg:#07130f; --stat-val:#7fd9bd; --epg: #d9f5c8; --details: #89bdac;
 }
 
 body[data-theme="stendhal" i] {
@@ -346,7 +359,8 @@ body[data-theme="cinema-gold"] {
   --warn-bg:#3c321e; --warn-ink:#f4d48e; --err-bg:#41251e; --err-ink:#f0a28c;
   --geo-bg:#342a22; --geo-ink:#dfc69b; --multi-bg:#29291e; --multi-ink:#d1d0a3;
   --card:#201c15; --meta:#191611; --meta-line:#3b3427; --dlg:#14120f; --dlg-line:#51452f;
-  --stat-bg:#0e0d0b; --stat-val:#d7bd80; --pre-ink:#ded4bd;
+  --stat-bg:#0e0d0b; --stat-val:#d7bd80; --pre-ink:#ded4bd; --epg: #ffbd2e; --details: #bdab89;
+  font-family:  Verdana, Geneva, Tahoma, sans-serif;
 }
 
 body[data-theme="paper"] {
@@ -361,7 +375,8 @@ body[data-theme="paper"] {
   --warn-bg:#f5e6bd; --warn-ink:#70531c; --err-bg:#f3d8d3; --err-ink:#8c2f25;
   --geo-bg:#eadcf1; --geo-ink:#653b76; --multi-bg:#d9e6ee; --multi-ink:#2f5870;
   --card:#eee9df; --meta:#eee9df; --meta-line:#c9bdab; --dlg:#f8f5ee; --dlg-line:#c9bdab;
-  --stat-bg:#f2eee6; --stat-val:#405c75; --pre-ink:#405c75;
+  --stat-bg:#f2eee6; --stat-val:#405c75; --pre-ink:#405c75; --epg: #880000; --details: #880000;
+  font-family: Verdana, Geneva, Tahoma, sans-serif;
 }
 
 /* Phosphor: waveform-monitor / vectorscope look, green on black, monospace font */
@@ -376,7 +391,7 @@ body[data-theme="phosphor"] {
   --warn-bg:#2e2a05; --warn-ink:#f0e04d; --err-bg:#3a0f0f; --err-ink:#ff7a6b;
   --geo-bg:#14283a; --geo-ink:#8fc6ff; --multi-bg:#0d3326; --multi-ink:#7af0c0;
   --card:#05180e; --meta:#04140b; --meta-line:#0f3a22; --dlg:#03110a; --dlg-line:#11502d;
-  --stat-bg:#010703; --stat-val:#39ff88; --pre-ink:#8dffb8;
+  --stat-bg:#010703; --stat-val:#39ff88; --pre-ink:#8dffb8; --epg: #a8ffc9; --details: #89bd92;
   font-family:ui-monospace,"Cascadia Code",Consolas,monospace;
 }
 
@@ -393,7 +408,7 @@ body[data-theme="nordic"] {
   --warn-bg:#4a4230; --warn-ink:#ebcb8b; --err-bg:#4c3037; --err-ink:#e08a95;
   --geo-bg:#433a52; --geo-ink:#c9a9e0; --multi-bg:#324656; --multi-ink:#9ccfe3;
   --card:#394050; --meta:#343b48; --meta-line:#474f62; --dlg:#2e3440; --dlg-line:#4c566a;
-  --stat-bg:#272c36; --stat-val:#88c0d0; --pre-ink:#c4d6e4;
+  --stat-bg:#272c36; --stat-val:#88c0d0; --pre-ink:#c4d6e4; --epg: #d8dfff; --details: #89b5bd;
   font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
 }
 
@@ -563,6 +578,8 @@ body[data-theme="nordic"] {
   </div>
 </dialog>
 
+<!-- hls.js is loaded here (not in <head>) so it never blocks the first paint; it still runs before the app script. -->
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 <script>
 (() => {
   'use strict';
@@ -621,7 +638,7 @@ body[data-theme="nordic"] {
      Small utilities
      ===================================================================== */
   const $ = id => document.getElementById(id);
-  const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
   const uniq = (arr, v) => { if (v && !arr.includes(v)) arr.push(v); };
 
@@ -899,41 +916,94 @@ body[data-theme="nordic"] {
     const label = { auto: 'automatic', dark: 'dark', light: 'light', theme: 'theme default' }[mode];
     el.title = 'Logo background: ' + label + ' · click to change';
   }
-  function detectLogoBackdrop(url) {
-    if (logoAnalysis.has(url)) return logoAnalysis.get(url);
-    const result = new Promise(resolve => {
-      const probe = new Image();
-      probe.crossOrigin = 'anonymous';
-      probe.onload = () => {
-        try {
+
+  /* ---- Logo backdrop detection -------------------------------------------------
+     Result per logo URL ('dark' | 'light' | 'theme') is persisted in IndexedDB, so a logo is
+     probed at most once ever (a probe is a second, CORS-mode download of the image).
+     Unknown logos go through a small LIFO queue (newest = currently visible first) with a
+     shared 32x32 canvas, instead of one canvas + one image per logo all at once. */
+  const LOGO_CACHE_MAX = 20000;
+  const LOGO_CONCURRENCY = 3;
+  const LOGO_PROBE_TIMEOUT = 8000;
+  const logoBd = Object.create(null);
+  let logoBdCount = 0, logoBdTimer = null;
+  const logoBdReady = idbGet('logobd').then(saved => {
+    if (saved && typeof saved === 'object') for (const k in saved) if (!(k in logoBd)) { logoBd[k] = saved[k]; logoBdCount++; }
+  }).catch(() => {});
+  function rememberBackdrop(url, mode) {
+    if (!(url in logoBd)) logoBdCount++;
+    logoBd[url] = mode;
+    if (logoBdCount > LOGO_CACHE_MAX) {            // drop the oldest quarter (insertion order)
+      let drop = LOGO_CACHE_MAX >> 2;
+      for (const k in logoBd) { delete logoBd[k]; logoBdCount--; if (--drop <= 0) break; }
+    }
+    clearTimeout(logoBdTimer);
+    logoBdTimer = setTimeout(() => idbSet('logobd', { ...logoBd }), 3000);
+  }
+  const logoQueue = [];
+  let logoActive = 0, logoCtx = null;
+  function probeLogo(url, done) {
+    const probe = new Image();
+    let finished = false, tm = null;
+    const fin = (mode, persist) => {
+      if (finished) return;
+      finished = true; clearTimeout(tm);
+      probe.onload = probe.onerror = null;
+      if (persist) rememberBackdrop(url, mode);
+      done(mode);
+    };
+    tm = setTimeout(() => fin('theme', false), LOGO_PROBE_TIMEOUT);   // a hung probe must not block the queue
+    probe.crossOrigin = 'anonymous';
+    probe.decoding = 'async';
+    probe.onload = () => {
+      try {
+        if (!logoCtx) {
           const canvas = document.createElement('canvas');
           canvas.width = canvas.height = 32;
-          const ctx = canvas.getContext('2d', { willReadFrequently: true });
-          ctx.drawImage(probe, 0, 0, 32, 32);
-          const px = ctx.getImageData(0, 0, 32, 32).data;
-          let alphaPixels = 0, count = 0, lum = 0;
-          for (let i = 0; i < px.length; i += 4) {
-            const a = px[i + 3] / 255;
-            if (a < .95) alphaPixels++;
-            if (a < .2) continue;
-            lum += (.2126 * px[i] + .7152 * px[i + 1] + .0722 * px[i + 2]) / 255;
-            count++;
-          }
-          if (alphaPixels / 1024 < .05 || !count) return resolve('theme');
-          const avg = lum / count;
-          resolve(avg > .70 ? 'dark' : avg < .28 ? 'light' : 'theme');
-        } catch (_) { resolve('theme'); }
-      };
-      probe.onerror = () => resolve('theme');
-      probe.src = url;
+          logoCtx = canvas.getContext('2d', { willReadFrequently: true });
+        }
+        logoCtx.clearRect(0, 0, 32, 32);
+        logoCtx.drawImage(probe, 0, 0, 32, 32);
+        const px = logoCtx.getImageData(0, 0, 32, 32).data;
+        let alphaPixels = 0, count = 0, lum = 0;
+        for (let i = 0; i < px.length; i += 4) {
+          const a = px[i + 3] / 255;
+          if (a < .95) alphaPixels++;
+          if (a < .2) continue;
+          lum += (.2126 * px[i] + .7152 * px[i + 1] + .0722 * px[i + 2]) / 255;
+          count++;
+        }
+        if (alphaPixels / 1024 < .05 || !count) return fin('theme', true);
+        const avg = lum / count;
+        fin(avg > .70 ? 'dark' : avg < .28 ? 'light' : 'theme', true);
+      } catch (_) { fin('theme', true); }
+    };
+    probe.onerror = () => fin('theme', true);
+    probe.src = url;
+  }
+  function pumpLogoQueue() {
+    while (logoActive < LOGO_CONCURRENCY && logoQueue.length) {
+      const job = logoQueue.pop();
+      logoActive++;
+      probeLogo(job.url, mode => { logoActive--; job.resolve(mode); pumpLogoQueue(); });
+    }
+  }
+  function detectLogoBackdrop(url) {
+    if (logoAnalysis.has(url)) return logoAnalysis.get(url);
+    const result = logoBdReady.then(() => {
+      const known = logoBd[url];
+      if (known) return known;
+      return new Promise(resolve => { logoQueue.push({ url, resolve }); pumpLogoQueue(); });
     });
     logoAnalysis.set(url, result);
     return result;
   }
   function prepareLogo(el, url) {
     el.dataset.logoUrl = url;
-    el.dataset.detectedBackdrop = 'theme';
+    const known = logoBd[url];
+    el.dataset.detectedBackdrop = known || 'theme';
     applyLogoMode(el, url);
+    if (known) return;                      // already analysed: no probe, no promise
     detectLogoBackdrop(url).then(mode => {
       el.dataset.detectedBackdrop = mode;
       applyLogoMode(el, url);
@@ -965,7 +1035,7 @@ body[data-theme="nordic"] {
     p.epgFileName = typeof p.epgFileName === 'string' ? p.epgFileName : '';
   });
 
-  const plData = {};            // playlist id -> { raw, idx, info, ts }
+  const plData = {};            // playlist id -> { raw, idx, info, ts, sig }
   const plStatus = {};          // playlist id -> { n, info, err, warn }
 
   let channels = [];            // merged channel objects
@@ -1080,7 +1150,7 @@ body[data-theme="nordic"] {
   async function loadPlaylist(p, force) {
     const key = 'pl2:' + p.id;
     const cached = await idbGet(key);
-    const wrap = c => ({ raw: c.raw, idx: c.idx || {}, info: analyze(c.raw), ts: c.ts });
+    const wrap = c => ({ raw: c.raw, idx: c.idx || {}, info: analyze(c.raw), ts: c.ts, sig: sig(p) });
 
     if (p.type === 'file') {
       if (cached && cached.raw) { plStatus[p.id] = { n: cached.raw.length, info: 'local file' }; return wrap(cached); }
@@ -1125,7 +1195,12 @@ body[data-theme="nordic"] {
     const my = ++loadToken;
     const active = playlists.filter(p => p.enabled);
     if (!channels.length) setListMsg(active.length ? 'Loading playlists…' : 'No playlist enabled. Open ⚙ Settings.');
-    await Promise.all(active.map(async p => { plData[p.id] = await loadPlaylist(p, force); }));
+    await Promise.all(active.map(async p => {
+      // Already in memory and still fresh: no IndexedDB round trip, no re-analysis
+      const d = plData[p.id];
+      if (!force && d && d.raw.length && d.sig === sig(p) && Date.now() - d.ts < TTL) return;
+      plData[p.id] = await loadPlaylist(p, force);
+    }));
     if (my !== loadToken) return;
     rebuild();
     renderPlaylists();
@@ -1144,6 +1219,7 @@ body[data-theme="nordic"] {
     channels = buildChannels(entries);
     byUrl = new Map();
     for (const ch of channels) for (const s of ch.streams) byUrl.set(s.url, ch);
+    bumpList();
     render();
     updateCount();
   }
@@ -1157,6 +1233,24 @@ body[data-theme="nordic"] {
     (settings.hideDead && dead[ch.uid] && !(cur && cur.uid === ch.uid));
   const unknownLabel = g => g === 'Unknown country' || g === 'Uncategorized';
 
+  /* The visible channel set and the country/category grouping only change when channels, the
+     dead list, the hide options or the playing channel change; they are cached until bumpList(). */
+  let baseCache = null, groupCache = null;
+  const bumpList = () => { baseCache = null; groupCache = null; };
+  const getBase = () => baseCache || (baseCache = channels.filter(c => !isHidden(c)));
+  function getGroups() {
+    if (groupCache && groupCache.view === view) return groupCache;
+    const map = new Map();
+    for (const c of getBase()) {
+      const keys = view === 'country'
+        ? (c.countries.length ? c.countries : ['Unknown country'])
+        : (c.cats.length ? c.cats : ['Uncategorized']);
+      for (const k of keys) { let a = map.get(k); if (!a) map.set(k, a = []); a.push(c); }
+    }
+    const keys = [...map.keys()].sort((a, b) => (unknownLabel(a) - unknownLabel(b)) || collator.compare(a, b));
+    return (groupCache = { view, map, keys });
+  }
+
   function buildRows() {
     const q = norm(query.trim());
     const asRows = (arr, group) => arr.map(ch => ({ t: 'c', ch, group }));
@@ -1165,30 +1259,25 @@ body[data-theme="nordic"] {
       shown = (view === 'fav' ? favs : recent).filter(c => matches(c, q));
       return asRows(shown);
     }
-    const base = channels.filter(c => !isHidden(c));
     if (view === 'all' || q) {
-      shown = base.filter(c => matches(c, q));
+      shown = getBase().filter(c => matches(c, q));
       return asRows(shown);
     }
-    const groups = new Map();
-    for (const c of base) {
-      const keys = view === 'country'
-        ? (c.countries.length ? c.countries : ['Unknown country'])
-        : (c.cats.length ? c.cats : ['Uncategorized']);
-      for (const k of keys) { if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
-    }
+    const { map, keys } = getGroups();
     const out = [];
-    const keys = [...groups.keys()].sort((a, b) => (unknownLabel(a) - unknownLabel(b)) || collator.compare(a, b));
     for (const k of keys) {
-      const arr = groups.get(k), open = openGroup === k;
+      const arr = map.get(k), open = openGroup === k;
       out.push({ t: 'h', g: k, n: arr.length, open });
       if (open) { shown = arr; out.push(...asRows(arr, k)); }
     }
     return out;
   }
 
+  const rowMap = new Map();     // data-id -> row element (O(1) lookups instead of attribute selectors)
+  let activeEl = null;
   function setListMsg(text) {
     list.textContent = '';
+    rowMap.clear(); activeEl = null;
     list.append(h('li', { class: 'msg', text }));
   }
   function emptyMessage() {
@@ -1202,7 +1291,7 @@ body[data-theme="nordic"] {
     return 'Nothing to show.';
   }
 
-  const findRow = id => list.querySelector('[data-id="' + CSS.escape(id) + '"]');
+  const findRow = id => rowMap.get(id) || null;
   const cursorEl = () => {
     const a = document.activeElement;
     return a && a.classList && a.classList.contains('row') && list.contains(a) ? a : null;
@@ -1213,6 +1302,7 @@ body[data-theme="nordic"] {
     const keepId = o.focusId !== undefined ? o.focusId : (c ? c.dataset.id : null);
     rows = buildRows();
     list.textContent = '';
+    rowMap.clear(); activeEl = null;
     rendered = 0;
     if (!rows.length) { setListMsg(emptyMessage()); updateCount(); return; }
     appendRows(CHUNK);
@@ -1239,6 +1329,7 @@ body[data-theme="nordic"] {
       li.dataset.id = 'g:' + r.g; li.dataset.group = r.g;
       li.setAttribute('role', 'button'); li.setAttribute('aria-expanded', String(r.open));
       li.append(h('span', { text: (r.open ? '▾ ' : '▸ ') + r.g }), h('span', { class: 'cnt', text: r.n }));
+      rowMap.set(li.dataset.id, li);
       return li;
     }
     const ch = r.ch;
@@ -1246,12 +1337,12 @@ body[data-theme="nordic"] {
     li.className = 'row channel';
     li.dataset.id = 'c:' + ch.uid;
     if (r.group) li.dataset.group = r.group;
-    if (cur && cur.uid === ch.uid) li.classList.add('active');
+    if (cur && cur.uid === ch.uid) { li.classList.add('active'); activeEl = li; }
     if (dead[ch.uid]) { li.classList.add('dead'); li.title = 'Failed to start (' + (dead[ch.uid].k || 'error') + ')'; }
 
     const logo = h('div', { class: 'logo', title: 'Logo background: automatic · click to change' });
     if (ch.logo) {
-      const img = h('img', { alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' });
+      const img = h('img', { alt: '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' });
       img.onerror = () => img.remove();
       img.onload = () => prepareLogo(logo, ch.logo);
       img.src = ch.logo;
@@ -1265,6 +1356,7 @@ body[data-theme="nordic"] {
     const on = isFav(ch);
     li.append(logo, h('div', { class: 'txt' }, name, h('span', { class: 'sub', text: sub })),
       h('button', { class: 'star' + (on ? ' on' : ''), type: 'button', tabindex: '-1', title: 'Favorite', text: on ? '★' : '☆' }));
+    rowMap.set(li.dataset.id, li);
     return li;
   }
 
@@ -1294,19 +1386,21 @@ body[data-theme="nordic"] {
   }
 
   function focusRow(el) { if (el) { el.focus({ preventScroll: true }); el.scrollIntoView({ block: 'nearest' }); } }
+  const asRow = el => (el && el.classList.contains('row') ? el : null);
   function moveCursor(delta) {
-    let els = [...list.querySelectorAll('li.row')];
-    if (!els.length) return;
     const c = cursorEl();
-    let i = c ? els.indexOf(c) : (delta > 0 ? -1 : els.length);
-    i += delta;
-    while (i >= els.length && rendered < rows.length) { appendRows(CHUNK); els = [...list.querySelectorAll('li.row')]; }
-    focusRow(els[Math.max(0, Math.min(els.length - 1, i))]);
+    let el;
+    if (!c) el = asRow(delta > 0 ? list.firstElementChild : list.lastElementChild);
+    else {
+      el = delta > 0 ? c.nextElementSibling : c.previousElementSibling;
+      if (!el && delta > 0 && rendered < rows.length) { appendRows(CHUNK); el = c.nextElementSibling; }
+      if (!el) el = c;
+    }
+    focusRow(el);
   }
   function jumpCursor(last) {
     if (last) while (rendered < rows.length) appendRows(CHUNK);
-    const els = list.querySelectorAll('li.row');
-    focusRow(last ? els[els.length - 1] : els[0]);
+    focusRow(asRow(last ? list.lastElementChild : list.firstElementChild));
   }
   function revealChannel(ch) {
     let el = findRow('c:' + ch.uid);
@@ -1320,9 +1414,9 @@ body[data-theme="nordic"] {
     $('fav-count').textContent = favs.length ? ' (' + favs.length + ')' : '';
   }
   function markActive() {
-    const old = list.querySelector('li.active');
-    if (old) old.classList.remove('active');
-    if (cur) { const el = findRow('c:' + cur.uid); if (el) el.classList.add('active'); }
+    if (activeEl) activeEl.classList.remove('active');
+    activeEl = cur ? findRow('c:' + cur.uid) : null;
+    if (activeEl) activeEl.classList.add('active');
   }
 
   /* =====================================================================
@@ -1429,11 +1523,32 @@ body[data-theme="nordic"] {
   let timer = null, playing = false, runPlayed = false, recordPending = false;
   let recoveries = 0, netRetries = 0, skipChain = 0, bitrate = 0, ignoreVol = false;
   let mediaRecorder = null, recordStream = null, recordedChunks = [], recordingStartedAt = 0, recordingChannelName = '';
-  let recordingTimer = null, recordingUrl = null, recordFinalizing = false;
+  let recordRaf = 0, recordLastTc = '', recordingUrl = null, recordFinalizing = false;
   const recordFormats = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
 
   function recordSupported() {
     return !!((video.captureStream || video.mozCaptureStream) && typeof MediaRecorder !== 'undefined');
+  }
+  // Display-only 25 fps timecode; the source stream's actual frame rate is not exposed here.
+  function recordTimecode() {
+    const totalFrames = Math.floor(Math.max(0, Date.now() - recordingStartedAt) * 25 / 1000);
+    const frames = totalFrames % 25;
+    const totalSeconds = Math.floor(totalFrames / 25);
+    const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+    const minutes = String(Math.floor(totalSeconds / 60) % 60).padStart(2, '0');
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
+    return 'REC: ' + hours + ':' + minutes + ':' + seconds + ':' + String(frames).padStart(2, '0');
+  }
+  /** Light per-frame loop: touches the DOM only when the timecode text actually changes. */
+  function tickRecordTimecode() {
+    recordRaf = 0;
+    if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+    const tc = recordTimecode();
+    if (tc !== recordLastTc) { recordLastTc = tc; recordTimecodeEl.textContent = tc; }
+    recordRaf = requestAnimationFrame(tickRecordTimecode);
+  }
+  function stopRecordTicker() {
+    if (recordRaf) { cancelAnimationFrame(recordRaf); recordRaf = 0; }
   }
   function updateRecordControls() {
     const active = !!mediaRecorder && mediaRecorder.state === 'recording';
@@ -1444,16 +1559,8 @@ body[data-theme="nordic"] {
     btnRecord.textContent = '● REC';
     btnRecord.title = !supported ? 'Recording is not supported in this browser' : active ? 'Recording · click REC to stop and download' : recordFinalizing ? 'Preparing the recording download' : 'Record the current stream';
     recordTimecodeEl.classList.toggle('is-visible', active);
-    if (active) {
-      // Display-only 25 fps timecode; the source stream's actual frame rate is not exposed here.
-      const totalFrames = Math.floor(Math.max(0, Date.now() - recordingStartedAt) * 25 / 1000);
-      const frames = totalFrames % 25;
-      const totalSeconds = Math.floor(totalFrames / 25);
-      const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
-      const minutes = String(Math.floor(totalSeconds / 60) % 60).padStart(2, '0');
-      const seconds = String(totalSeconds % 60).padStart(2, '0');
-      recordTimecodeEl.textContent = 'REC: ' + hours + ':' + minutes + ':' + seconds + ':' + String(frames).padStart(2, '0');
-    }
+    if (active) { if (!recordRaf) { recordLastTc = ''; tickRecordTimecode(); } }
+    else stopRecordTicker();
   }
   function startRecording() {
     if (!recordSupported()) {
@@ -1476,7 +1583,7 @@ body[data-theme="nordic"] {
         btnRecord.title = 'Recording error: ' + ((e.error && e.error.message) || 'stream capture failed');
       };
       mediaRecorder.onstop = () => {
-        clearInterval(recordingTimer); recordingTimer = null; recordFinalizing = false;
+        stopRecordTicker(); recordFinalizing = false;
         if (recordStream) { recordStream.getTracks().forEach(track => track.stop()); recordStream = null; }
         const type = mediaRecorder && mediaRecorder.mimeType || 'video/webm';
         const blob = new Blob(recordedChunks, { type });
@@ -1509,8 +1616,7 @@ body[data-theme="nordic"] {
       recordingStartedAt = Date.now();
       recordingChannelName = cur.name || 'IPTV-recording';
       mediaRecorder.start(1000);
-      recordingTimer = setInterval(updateRecordControls, 40);
-      updateRecordControls();
+      updateRecordControls();           // also starts the timecode ticker
     } catch (err) {
       if (recordStream) { recordStream.getTracks().forEach(track => track.stop()); recordStream = null; }
       mediaRecorder = null;
@@ -1521,7 +1627,7 @@ body[data-theme="nordic"] {
   function stopRecording(reason) {
     if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
     recordFinalizing = true;
-    clearInterval(recordingTimer); recordingTimer = null;
+    stopRecordTicker();
     try { mediaRecorder.stop(); }
     catch (err) { recordFinalizing = false; btnRecord.title = (reason ? reason + ' ' : '') + 'Could not finish recording: ' + err.message; }
     updateRecordControls();
@@ -1580,6 +1686,8 @@ body[data-theme="nordic"] {
   function play(ch, o = {}) {
     if (!ch || !ch.streams || !ch.streams.length) return;
     run++;
+    // A failed channel is only shown while it is the playing one, so the cached list may change
+    if (settings.hideDead && ((cur && dead[cur.uid]) || dead[ch.uid])) bumpList();
     cur = ch; opts = o;
     tried = new Set(); failInfo = { total: 0, geo: 0, last: null };
     runPlayed = false; recordPending = o.record !== false;
@@ -1632,7 +1740,8 @@ body[data-theme="nordic"] {
     timer = setTimeout(() => { if (r === run && a === attempt && !playing) failStream(r, a, 'timeout', 'No data within ' + START_TIMEOUT / 1000 + ' s'); }, START_TIMEOUT);
 
     if (window.Hls && Hls.isSupported()) {
-      const hh = new Hls({ enableWorker: true, lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 30 });
+      // maxBufferSize caps the buffered bytes (high-bitrate 1080p/4K would otherwise buffer far more RAM)
+      const hh = new Hls({ enableWorker: true, lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 30, maxBufferSize: 30 * 1000 * 1000 });
       hls = hh;
       hh.on(Hls.Events.MANIFEST_PARSED, () => { if (hh !== hls || a !== attempt) return; buildQuality(hh); startPlayback(r, a); });
       hh.on(Hls.Events.LEVEL_SWITCHED, (_, d) => {
@@ -1711,6 +1820,7 @@ body[data-theme="nordic"] {
   function markDead(ch, kind) {
     dead[ch.uid] = { t: Date.now(), k: kind };
     store.set('dead', dead);
+    bumpList();
     const el = findRow('c:' + ch.uid);
     if (el) { el.classList.add('dead'); el.title = 'Failed to start (' + kind + ')'; }
   }
@@ -1727,6 +1837,7 @@ body[data-theme="nordic"] {
     updateDetails();
     if (dead[cur.uid]) {
       delete dead[cur.uid]; store.set('dead', dead);
+      bumpList();
       const el = findRow('c:' + cur.uid);
       if (el) { el.classList.remove('dead'); el.removeAttribute('title'); }
     }
@@ -1767,8 +1878,76 @@ body[data-theme="nordic"] {
     detailsEl.title = 'Resolution comes from the decoded video. The bitrate is the HLS variant bitrate, not measured throughput.';
   }
 
-  /* ---------- Lightweight Now / Next EPG ---------- */
-  let epgCache = null, epgLocalGuide = null, epgRequestToken = 0, epgRefreshTimer = null, epgAbortController = null;
+  /* ---------- Lightweight Now / Next EPG ----------
+     The XMLTV file is parsed ONCE (in a Web Worker, falling back to the main thread) into a
+     Map<channelId, [{start, stop, title}]>. Only that small index is kept in memory: the raw XML
+     text (up to 32 MB) is discarded right after parsing, and zapping is just a Map lookup. */
+  /* BEGIN epgParseCore: must stay self-contained (it is also serialized into the worker) */
+  function epgParseCore(xml, now) {
+    const idx = new Map();
+    const keepFrom = now - 3600e3, keepTo = now + 48 * 3600e3;
+    const reStart = /(?:^|\s)start\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+    const reStop = /(?:^|\s)stop\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+    const reCh = /(?:^|\s)channel\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+    const reTitle = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/i;
+    const reTime = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2}))?/;
+    const unesc = s => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+      .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+      .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n))
+      .replace(/&amp;/g, '&');
+    const val = m => (m ? (m[1] !== undefined ? m[1] : m[2]) : '');
+    const time = v => {
+      const m = String(v || '').match(reTime);
+      if (!m) return NaN;
+      const y = +m[1], mo = +m[2] - 1, d = +m[3], hh = +m[4], mi = +m[5], s = +m[6];
+      if (m[7]) return Date.UTC(y, mo, d, hh, mi, s) - (m[7] === '+' ? 1 : -1) * (+m[8] * 60 + +m[9]) * 60000;
+      return new Date(y, mo, d, hh, mi, s).getTime();
+    };
+    const re = /<programme\b([^>]*)>([\s\S]*?)<\/programme\s*>/gi;
+    let m;
+    while ((m = re.exec(xml))) {
+      const attrs = m[1];
+      const stop = time(val(attrs.match(reStop)));
+      if (!(stop > keepFrom)) continue;                          // already finished: drop
+      const start = time(val(attrs.match(reStart)));
+      if (!Number.isFinite(start) || start > keepTo) continue;   // too far in the future: drop
+      let id = val(attrs.match(reCh));
+      if (!id) continue;
+      const t = m[2].match(reTitle);
+      if (!t) continue;
+      const title = unesc(t[1]).trim();
+      if (!title) continue;
+      if (id.indexOf('&') >= 0) id = unesc(id);
+      let a = idx.get(id);
+      if (!a) idx.set(id, a = []);
+      a.push({ start, stop, title });
+    }
+    for (const a of idx.values()) a.sort((x, y) => x.start - y.start);
+    return idx;
+  }
+  /* END epgParseCore */
+
+  function parseEpg(text) {
+    return new Promise((resolve, reject) => {
+      const local = () => { try { resolve(epgParseCore(text, Date.now())); } catch (e) { reject(e); } };
+      let worker, blobUrl;
+      try {
+        const src = 'const parse=' + epgParseCore.toString() +
+          ';onmessage=e=>{try{postMessage({idx:parse(e.data,Date.now())})}catch(x){postMessage({err:String(x&&x.message||x)})}};';
+        blobUrl = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+        worker = new Worker(blobUrl);
+      } catch (_) { if (blobUrl) URL.revokeObjectURL(blobUrl); return local(); }
+      const done = () => { worker.terminate(); URL.revokeObjectURL(blobUrl); };
+      worker.onmessage = e => { done(); if (e.data.err) reject(new Error(e.data.err)); else resolve(e.data.idx); };
+      worker.onerror = () => { done(); local(); };       // worker blocked or crashed: parse here instead
+      worker.postMessage(text);
+    });
+  }
+
+  let epgIndexCache = null;       // { key, idx, loadedAt }
+  let epgPending = null;          // { key, promise, controller }
+  let epgRequestToken = 0, epgRefreshTimer = null;
   const EPG_MAX_BYTES = 32 * 1024 * 1024;
   let epgInfoMessage = '';
   function epgMessage(text, isGuide = false) {
@@ -1794,10 +1973,7 @@ body[data-theme="nordic"] {
       if (!/<tv\b/i.test(text)) throw new Error('The URL did not return an XMLTV guide');
       return text;
   }
-  async function loadEpgXml(url) {
-    if (epgCache && epgCache.url === url && Date.now() - epgCache.loadedAt < 30 * 60 * 1000) return epgCache.text;
-    const controller = new AbortController();
-    epgAbortController = controller;
+  async function fetchEpgText(url, controller) {
     const timeout = setTimeout(() => controller.abort(), 20000);
     try {
       const response = await fetch(url, { signal: controller.signal, cache: 'no-cache' });
@@ -1809,13 +1985,8 @@ body[data-theme="nordic"] {
         if (typeof DecompressionStream !== 'function') throw new Error('This browser cannot open a .gz EPG file');
         stream = stream.pipeThrough(new DecompressionStream('gzip'));
       }
-      const text = await readEpgStream(stream);
-      epgCache = { url, text, loadedAt: Date.now() };
-      return text;
-    } finally {
-      clearTimeout(timeout);
-      if (epgAbortController === controller) epgAbortController = null;
-    }
+      return await readEpgStream(stream);
+    } finally { clearTimeout(timeout); }
   }
   async function readLocalEpgFile(file, fileName = file.name || 'guide.xml') {
     let stream = file.stream();
@@ -1825,43 +1996,37 @@ body[data-theme="nordic"] {
     }
     return readEpgStream(stream);
   }
-  async function loadPlaylistEpg(p) {
-    if (p.epgUrl) return loadEpgXml(p.epgUrl);
-    if (!p.epgFileName) throw new Error('Choose an EPG file for this playlist');
-    if (epgLocalGuide && epgLocalGuide.playlistId === p.id) return epgLocalGuide.text;
-    const saved = await idbGet('epg:' + p.id);
-    if (!saved || !saved.blob) throw new Error('Choose the local EPG file again');
-    const text = await readLocalEpgFile(saved.blob, saved.name || p.epgFileName);
-    epgLocalGuide = { playlistId: p.id, text };
-    return text;
+  const epgKey = p => p.epgUrl ? 'u:' + p.epgUrl : 'f:' + p.id + ':' + p.epgFileName;
+  /** Returns the parsed guide index of a playlist (cached; concurrent callers share one load). */
+  async function getEpgIndex(p) {
+    if (!p.epgUrl && !p.epgFileName) throw new Error('Choose an EPG file for this playlist');
+    const key = epgKey(p);
+    if (epgIndexCache && epgIndexCache.key === key && (key[0] === 'f' || Date.now() - epgIndexCache.loadedAt < 30 * 60 * 1000)) return epgIndexCache.idx;
+    if (epgPending && epgPending.key === key) return epgPending.promise;
+    if (epgPending) epgPending.controller.abort();          // another guide was requested: drop the old download
+    const controller = new AbortController();
+    const pend = { key, controller, promise: null };
+    pend.promise = (async () => {
+      try {
+        let text;
+        if (p.epgUrl) text = await fetchEpgText(p.epgUrl, controller);
+        else {
+          const saved = await idbGet('epg:' + p.id);
+          if (!saved || !saved.blob) throw new Error('Choose the local EPG file again');
+          text = await readLocalEpgFile(saved.blob, saved.name || p.epgFileName);
+        }
+        const idx = await parseEpg(text);                    // `text` is released after this point
+        epgIndexCache = { key, idx, loadedAt: Date.now() };
+        return idx;
+      } finally { if (epgPending === pend) epgPending = null; }
+    })();
+    epgPending = pend;
+    return pend.promise;
   }
-  function xmltvTime(value) {
-    const m = String(value || '').match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2}))?/);
-    if (!m) return NaN;
-    const parts = m.slice(1, 7).map(Number);
-    let time = Date.UTC(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]);
-    if (m[7]) time -= (m[7] === '+' ? 1 : -1) * (Number(m[8]) * 60 + Number(m[9])) * 60000;
-    else time = new Date(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]).getTime();
-    return time;
-  }
-  function findEpgSchedule(xml, channelId) {
-    const re = /<programme\b([^>]*)>([\s\S]*?)<\/programme\s*>/gi;
-    const results = []; let m;
-    while ((m = re.exec(xml))) {
-      const a = m[1].match(/\bchannel\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-      if (!a || (a[1] || a[2]) !== channelId) continue;
-      const doc = new DOMParser().parseFromString(m[0], 'application/xml');
-      const p = doc.documentElement;
-      const start = xmltvTime(p.getAttribute('start')), stop = xmltvTime(p.getAttribute('stop'));
-      const title = p.querySelector('title');
-      if (Number.isFinite(start) && Number.isFinite(stop) && title && title.textContent.trim()) {
-        results.push({ start, stop, title: title.textContent.trim() });
-      }
-    }
-    return results.sort((a, b) => a.start - b.start);
+  function dropEpgCache(playlistId) {
+    if (epgIndexCache && (!playlistId || epgIndexCache.key.indexOf('f:' + playlistId + ':') === 0 || epgIndexCache.key[0] === 'u')) epgIndexCache = null;
   }
   async function updateEpg() {
-    if (epgAbortController) { epgAbortController.abort(); epgAbortController = null; }
     const token = ++epgRequestToken;
     clearTimeout(epgRefreshTimer); epgRefreshTimer = null;
     if (!settings.epgEnabled || !cur || !curStream) { epgMessage(''); return; }
@@ -1871,11 +2036,11 @@ body[data-theme="nordic"] {
     if (!playlist.epgUrl && !playlist.epgFileName) { epgMessage('Set an EPG source for this playlist'); return; }
     const channelId = String(curStream.id || cur.id || '').trim();
     if (!channelId) { epgMessage('EPG needs a tvg-id for this channel'); return; }
-    epgMessage('Loading EPG…');
+    if (!(epgIndexCache && epgIndexCache.key === epgKey(playlist))) epgMessage('Loading EPG…');
     try {
-      const xml = await loadPlaylistEpg(playlist);
+      const index = await getEpgIndex(playlist);
       if (token !== epgRequestToken || !settings.epgEnabled || !cur || !curStream || curStream.playlistId !== playlistId || String(curStream.id || cur.id || '').trim() !== channelId) return;
-      const programmes = findEpgSchedule(xml, channelId);
+      const programmes = index.get(channelId) || [];
       const now = Date.now();
       const current = programmes.find(p => p.start <= now && now < p.stop);
       const next = programmes.find(p => p.start >= (current ? current.stop : now));
@@ -1903,6 +2068,7 @@ body[data-theme="nordic"] {
     if (!statsEl.hidden) { updateStats(); statsTimer = setInterval(updateStats, 1000); }
   }
   function updateStats() {
+    if (document.hidden) return;         // nobody is looking: skip the work
     const L = [['Channel', cur ? cur.name : '—'], ['Resolution', video.videoWidth ? video.videoWidth + '×' + video.videoHeight : '—']];
     if (settings.epgEnabled && epgInfoMessage) L.push(['EPG', epgInfoMessage]);
     if (curStream) L.push(['Source', curStream.source + (cur.streams.length > 1 ? ' (stream ' + (cur.streams.indexOf(curStream) + 1) + ' of ' + cur.streams.length + ')' : '')]);
@@ -2010,7 +2176,7 @@ body[data-theme="nordic"] {
 
   /* ---------- Zapping ---------- */
   function zap(dir, o) {
-    const l = shown.length ? shown : channels.filter(c => !isHidden(c));
+    const l = shown.length ? shown : getBase();
     if (!l.length) return;
     const idx = cur ? l.findIndex(c => c.uid === cur.uid) : -1;
     let i = idx < 0 ? (dir > 0 ? -1 : 0) : idx;
@@ -2074,7 +2240,7 @@ body[data-theme="nordic"] {
     const t = e.target, tag = (t && t.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
       if (t === searchEl) {
-        if (e.key === 'ArrowDown') { e.preventDefault(); focusRow(list.querySelector('li.row')); }
+        if (e.key === 'ArrowDown') { e.preventDefault(); focusRow(asRow(list.firstElementChild)); }
         else if (e.key === 'Escape') { searchEl.value = ''; query = ''; render({ focusId: null }); searchEl.blur(); }
       }
       return;
@@ -2237,11 +2403,11 @@ body[data-theme="nordic"] {
       urlInput.setCustomValidity('');
       filePickToken++;
       p.epgUrl = value;
+      epgIndexCache = null;
       if (value) {
         p.epgFileName = '';
         fileInput.value = '';
         fileState.textContent = 'Using the online XMLTV URL.';
-        epgLocalGuide = null;
         idbDel('epg:' + p.id);
       } else fileState.textContent = p.epgFileName ? 'Saved local guide: ' + p.epgFileName : 'No local guide file selected.';
       savePlaylists();
@@ -2255,12 +2421,13 @@ body[data-theme="nordic"] {
       fileState.textContent = 'Loading local guide…';
       try {
         const text = await readLocalEpgFile(file);
+        const idx = await parseEpg(text);
         if (token !== filePickToken) return;
         await idbSet('epg:' + p.id, { blob: file, name: file.name, lastModified: file.lastModified });
         p.epgUrl = '';
         p.epgFileName = file.name;
         urlInput.value = '';
-        epgLocalGuide = { playlistId: p.id, text };
+        epgIndexCache = { key: epgKey(p), idx, loadedAt: Date.now() };
         savePlaylists();
         renderPlaylists();
         if (curStream && curStream.playlistId === p.id) updateEpg();
@@ -2277,6 +2444,7 @@ body[data-theme="nordic"] {
     delete plData[p.id]; delete plStatus[p.id];
     idbDel('pl2:' + p.id);
     idbDel('epg:' + p.id);
+    dropEpgCache(p.id);
     if (openMeta === p.id) openMeta = null;
     if (openEpg === p.id) openEpg = null;
     savePlaylists(); renderPlaylists(); reloadSoon();
@@ -2420,7 +2588,7 @@ body[data-theme="nordic"] {
   const bindCheck = (id, key) => {
     const el = $(id);
     el.checked = !!settings[key];
-    el.onchange = () => { settings[key] = el.checked; saveSettings(); render({ focusId: null }); };
+    el.onchange = () => { settings[key] = el.checked; saveSettings(); bumpList(); render({ focusId: null }); };
   };
   const themeInput = $('opt-theme');
   themeInput.value = THEMES.includes(settings.theme) ? settings.theme : 'midnight';
@@ -2442,6 +2610,7 @@ body[data-theme="nordic"] {
   epgInput.onchange = () => {
     settings.epgEnabled = epgInput.checked;
     saveSettings();
+    if (!settings.epgEnabled) epgIndexCache = null;     // free the guide index when EPG is switched off
     updateEpg();
   };
   $('opt-merge').value = settings.merge;
@@ -2477,6 +2646,7 @@ body[data-theme="nordic"] {
   $('btn-reset-dead').onclick = () => {
     dead = {}; store.set('dead', dead);
     $('dead-count').textContent = '0';
+    bumpList();
     render({ focusId: null });
   };
   $('btn-clear-recent').onclick = () => {
@@ -2514,5 +2684,3 @@ body[data-theme="nordic"] {
 </script>
 </body>
 </html>
-
-

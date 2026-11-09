@@ -13,7 +13,7 @@ Single-file HLS/IPTV player. Open it in a browser tab; no server required.
 - Keyboard navigation: arrow keys move through the channel list; Enter plays the selected channel
 
   IPTV Studio Pro
-      Mihai Lucian Lojewski /nov. 2026
+      Mihai Lucian Lojewski (nov. 2026)
       Copyright (c) 2026 Lojewski Studio
       SPDX-License-Identifier: MIT
 
@@ -579,7 +579,7 @@ body[data-theme="nordic"] {
 </dialog>
 
 <!-- hls.js is loaded here (not in <head>) so it never blocks the first paint; it still runs before the app script. -->
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.4/dist/hls.min.js"></script>
 <script>
 (() => {
   'use strict';
@@ -1636,19 +1636,20 @@ body[data-theme="nordic"] {
   /** Remove every subtitle / text track left on the <video> by the previous channel.
    *  Without this, the native CC menu keeps the old channel's subtitles until a page refresh. */
   function clearTextTracks() {
-    // 1. <track> elements that were appended to the DOM
-    video.querySelectorAll('track').forEach(t => t.remove());
-    // 2. TextTrack objects created with addTextTrack() cannot be deleted, only disabled and emptied
+    // TextTrack objects created by HLS/native playback cannot always be removed in place.
     const tt = video.textTracks;
-    if (!tt) return;
-    for (let i = 0; i < tt.length; i++) {
-      const t = tt[i];
-      try { t.mode = 'disabled'; } catch (_) {}
-      try {
-        const cues = t.cues;
-        if (cues) for (let j = cues.length - 1; j >= 0; j--) { try { t.removeCue(cues[j]); } catch (_) {} }
-      } catch (_) {}
+    if (tt) {
+      for (let i = 0; i < tt.length; i++) {
+        const t = tt[i];
+        try { t.mode = 'disabled'; } catch (_) {}
+        try {
+          const cues = t.cues;
+          if (cues) for (let j = cues.length - 1; j >= 0; j--) { try { t.removeCue(cues[j]); } catch (_) {} }
+        } catch (_) {}
+      }
     }
+    // Also remove any explicit <track> elements from the old video.
+    video.querySelectorAll('track').forEach(t => t.remove());
   }
 
   function teardown() {
@@ -1658,19 +1659,18 @@ body[data-theme="nordic"] {
       try { hls.destroy(); } catch (_) {}
       hls = null;
     }
+    clearTextTracks();
     video.pause();
     video.removeAttribute('src');
     try { video.load(); } catch (_) {}
     replaceVideoElement();
   }
 
-  /** Text tracks added with addTextTrack() (hls.js subtitles / CEA-608) can never be removed from a
-   *  <video>, so the native CC button keeps showing them. The only clean fix is a brand-new element.
-   *  It is replaced only when leftover tracks exist, and never while the <video> itself is fullscreen
-   *  (replacing it would exit fullscreen); in that case the tracks are just disabled and emptied. */
+  /** Recreate the video element on every stream change. Some browsers retain their native CC
+   *  selection even after tracks are disabled or removed, so checking textTracks.length is not enough.
+   *  In fullscreen, keep the current element to avoid exiting fullscreen and clear tracks in place. */
   function replaceVideoElement() {
     const old = video;
-    if (!old.textTracks || old.textTracks.length === 0) return;
     if (document.fullscreenElement === old) { clearTextTracks(); return; }
     const nv = old.cloneNode(false);            // keeps id, playsinline, controls, controlslist, no children
     nv.removeAttribute('src');
@@ -1740,7 +1740,8 @@ body[data-theme="nordic"] {
     timer = setTimeout(() => { if (r === run && a === attempt && !playing) failStream(r, a, 'timeout', 'No data within ' + START_TIMEOUT / 1000 + ' s'); }, START_TIMEOUT);
 
     if (window.Hls && Hls.isSupported()) {
-      // maxBufferSize caps the buffered bytes (high-bitrate 1080p/4K would otherwise buffer far more RAM)
+      // Buffer targets reduce memory use, but maxBufferLength is guaranteed even if maxBufferSize is exceeded;
+      // 30 MB is therefore not a strict memory ceiling.
       const hh = new Hls({ enableWorker: true, lowLatencyMode: false, backBufferLength: 30, maxBufferLength: 30, maxBufferSize: 30 * 1000 * 1000 });
       hls = hh;
       hh.on(Hls.Events.MANIFEST_PARSED, () => { if (hh !== hls || a !== attempt) return; buildQuality(hh); startPlayback(r, a); });

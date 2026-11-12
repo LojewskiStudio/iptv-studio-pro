@@ -1,15 +1,10 @@
 # IPTV Studio Pro
-
 A single-file IPTV player for HLS streams and M3U/M3U8 playlists. It runs in a modern browser, needs no application server or backend, and can be hosted as a static page.
 
-
-
+#
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/815d7873-e578-4c3a-8bae-0b39d1026d1d" />
 
-
-
-
-
+#
 
 
 **Demo:** https://lojewskistudio.github.io/iptv-studio-pro/ 

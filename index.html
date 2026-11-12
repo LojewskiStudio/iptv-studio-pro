@@ -82,10 +82,13 @@ body {
 
 /* ---------- Player column ---------- */
 .left {
-  flex:1; min-width:0; display:flex; align-items:flex-start; padding:14px; overflow-y:auto;
+  position:relative; flex:1; min-width:0; display:flex; align-items:flex-start; justify-content:center; padding:14px; overflow-y:auto;
   background:radial-gradient(ellipse at 50% 26%, var(--glow, var(--bg)) 0, var(--bg) 68%);
 }
 .player { position:relative; margin:20px auto 0; width:100%; max-width:1200px; }
+.sidebar-hidden .right { display:none; }
+.sidebar-hidden .left { align-items:safe center; }
+.sidebar-hidden .player { margin-top:0; }
 .video-box { position:relative; background:#000; }
 video {
   display:block; width:100%; aspect-ratio:16/9; max-height:calc(100vh - 200px);
@@ -184,13 +187,12 @@ select { max-width:200px; }
   padding:14px; display:flex; flex-direction:column; gap:10px; border-bottom:1px solid var(--line);
   background:linear-gradient(145deg, var(--head), var(--head2, var(--head)) 74%);
 }
-.title-row { display:flex; align-items:center; justify-content:space-between; }
 h1 { margin:0; font-size:1.45em; color:var(--accent); text-shadow:0 0 16px color-mix(in srgb, var(--title) 45%, transparent); }
 .signature { margin-top:-14px; color:var(--sig); font-size:.7em; letter-spacing:.02em; }
 .count { color:var(--cont); font-size:.8em; }
 
 .tabs { display:flex; flex-wrap:wrap; gap:2px; }
-.tab { padding:3px 6px; font-size:.72em; border:0; color:var(--btn-ink); transition:.15s; }
+.tab { padding:3px 6px; font-size:.72em; border: 1px solid var(--btn-line); color:var(--btn-ink); transition:.15s; }
 .tab.active { background:var(--accent); color:var(--bg); font-weight:700; }
 
 #search, .dlg input[type=text], .dlg input[type=url], .opt input[type=number] {
@@ -246,6 +248,17 @@ dialog::backdrop { background:rgba(0,0,0,.75); }
 .dlg-head { display:flex; justify-content:space-between; align-items:center; }
 .dlg h2 { margin:0; color:var(--accent); }
 .dlg h3 { margin:20px 0 8px; font-size:1em; color:var(--group-ink); border-bottom:1px solid var(--dlg-line); padding-bottom:4px; }
+.dlg a { color:var(--accent); }
+.about-card { margin:10px 0 4px; padding:18px; text-align:center; background:var(--card); border:1px solid var(--meta-line); border-radius:8px; }
+.about-name { color:var(--accent); font-size:1.2em; font-weight:700; }
+.about-version { margin-top:1px; color:var(--muted); font-size:.82em; }
+.about-author { margin-top:12px; font-weight:600; }
+.about-studio { color:var(--sig); font-size:.88em; }
+.about-license { margin:14px 0 10px; color:var(--muted); font-size:.86em; }
+.github-link { display:inline-flex; align-items:center; justify-content:center; color:var(--ink) !important; }
+.github-link svg { display:block; width:32px; height:32px; fill:currentColor; transition:color .15s, transform .15s; }
+.github-link:hover svg { color:var(--accent); transform:scale(1.08); }
+.dlg a { color:var(--accent); }
 .pl-item { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:8px 10px; background:var(--card); border-radius:6px; margin-bottom:6px; }
 .pl-item input[type=checkbox], .opt input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent); flex:none; }
 .pl-info { flex:1; min-width:0; }
@@ -266,6 +279,7 @@ dialog::backdrop { background:rgba(0,0,0,.75); }
 .epg-file-name, .epg-help { display:block; margin:4px 0 0 26px; color:var(--muted); overflow-wrap:anywhere; }
 .opt input[type=number] { width:90px; padding:6px 8px; font-size:1em; }
 .meta { margin:-2px 0 10px 26px; padding:12px; background:var(--meta); border:1px solid var(--meta-line); border-radius:6px; }
+.backup-preview { margin:8px 0; }
 .mrow { display:grid; grid-template-columns:150px 1fr; gap:4px 10px; align-items:center; margin-bottom:8px; }
 .mrow > span { color:var(--group-ink); }
 .mrow small { grid-column:2; color:var(--muted); }
@@ -283,11 +297,20 @@ kbd { padding:1px 7px; font:12px ui-monospace,Consolas,monospace; cursor:default
   body { flex-direction:column; height:auto; overflow:auto; }
   .left { padding:10px; overflow:visible; }
   .player { margin:20px auto 0; }
+  .sidebar-hidden .left { min-height:100vh; }
+  .sidebar-hidden .player { margin-top:0; }
   .stats { position:static; max-height:min(30vh,180px); box-shadow:none; }
   video { max-height:none; }
   .right { width:100%; height:75vh; border-left:0; }
   .mrow { grid-template-columns:1fr; }
   .mrow small { grid-column:1; }
+}
+@media (min-width:1440px) {
+  .player { max-width:min(84vw,1200px); }
+}
+@media (min-width:2400px) {
+  .player { max-width:min(84vw,3000px); }
+  .left { padding:clamp(14px,1vw,36px); }
 }
 @media (max-width:520px) {
   .stats { grid-template-columns:minmax(0,1fr); }
@@ -463,6 +486,8 @@ body[data-theme="nordic"] {
         <button class="btn record" id="btn-record" title="Record the current stream">● REC</button>
         <button class="btn" id="btn-stats" title="Stream statistics (I)">Info</button>
         <button class="btn" id="btn-fav" title="Add to favorites (S)">☆ Favorite</button>
+        <button class="btn" id="btn-settings" title="Settings">⚙</button>
+        <button class="btn" id="btn-sidebar" type="button" aria-controls="channel-panel" aria-expanded="true">Hide list</button>
       </div>
 
       <pre class="stats" id="stats" hidden></pre>
@@ -470,13 +495,8 @@ body[data-theme="nordic"] {
   </div>
 </div>
 
-<div class="right">
+<div class="right" id="channel-panel">
   <div class="right-header">
-    <div class="title-row">
-      <h1>IPTV Studio Pro</h1>
-      <button class="btn" id="btn-settings" title="Settings">⚙</button>
-    </div>
-    <div class="signature">IPTV Player Ver.01 / Lojewski Studio - 2026</div>
     <div class="tabs" id="tabs">
       <button class="tab" data-view="fav">★ FAVORITES<span id="fav-count"></span></button>
       <button class="tab" data-view="recent">RECENT</button>
@@ -557,8 +577,20 @@ body[data-theme="nordic"] {
     <h3>Data</h3>
     <div class="add">
       <button class="btn" id="btn-export">Export favorites (.m3u)</button>
+      <button class="btn" id="btn-backup-export">Save configuration backup (.json)</button>
+      <label class="btn-label">Restore configuration…
+        <input type="file" id="backup-file" accept=".json,application/json" hidden>
+      </label>
       <button class="btn" id="btn-reset-dead">Reset failed channels (<span id="dead-count">0</span>)</button>
       <button class="btn" id="btn-clear-recent">Clear recent</button>
+    </div>
+    <p class="opt-hint">The backup includes settings, playlists, favorites, and saved local playlist/EPG files. URL playlists are fetched again from their source after restore.</p>
+    <div class="meta backup-preview" id="backup-preview" hidden>
+      <span id="backup-preview-text"></span>
+      <div class="add">
+        <button class="btn" id="btn-backup-apply">Replace current data with this backup</button>
+        <button class="btn" id="btn-backup-cancel">Cancel</button>
+      </div>
     </div>
 
     <h3>Keyboard shortcuts</h3>
@@ -574,6 +606,18 @@ body[data-theme="nordic"] {
       <span><kbd>I</kbd></span><span>stream statistics</span>
       <span><kbd>F</kbd></span><span>fullscreen</span>
       <span><kbd>/</kbd></span><span>search (↓ jumps to the results, Esc clears)</span>
+    </div>
+
+    <h3>About</h3>
+    <div class="about-card">
+      <div class="about-name">IPTV Studio Pro</div>
+      <div class="about-version">ver.01</div>
+      <div class="about-author">Mihai Lucian Lojewski</div>
+      <div class="about-studio">Lojewski Studio · 2026</div>
+      <p class="about-license">An open-source product licensed under the MIT License</p>
+      <a class="github-link" href="https://github.com/LojewskiStudio/iptv-studio-pro" target="_blank" rel="noopener noreferrer" aria-label="Open IPTV Studio Pro on GitHub" title="IPTV Studio Pro on GitHub">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.51-1.3-1.25-1.64-1.25-1.64-1.03-.7.08-.69.08-.69 1.14.08 1.74 1.17 1.74 1.17 1.01 1.73 2.65 1.23 3.3.94.1-.73.4-1.23.72-1.51-2.5-.28-5.13-1.25-5.13-5.56 0-1.23.44-2.23 1.16-3.02-.12-.29-.5-1.43.11-2.98 0 0 .95-.3 3.1 1.15a10.8 10.8 0 0 1 5.64 0c2.15-1.45 3.1-1.15 3.1-1.15.61 1.55.23 2.69.11 2.98.72.79 1.16 1.79 1.16 3.02 0 4.32-2.64 5.27-5.15 5.55.41.35.77 1.03.77 2.08v3.09c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"/></svg>
+      </a>
     </div>
   </div>
 </dialog>
@@ -1131,8 +1175,19 @@ body[data-theme="nordic"] {
   const box = $('video-box'), list = $('channel-list'), searchEl = $('search');
   const statusEl = $('status'), noteEl = $('note'), detailsEl = $('details'), epgLineEl = $('epg-line'), recordTimecodeEl = $('record-timecode'), statsEl = $('stats'), dlg = $('settings');
   const selStream = $('sel-stream'), selQ = $('sel-quality'), selA = $('sel-audio'), selS = $('sel-subs');
-  // Keep native controls stable: Firefox can recalculate native cue sizing when toggled on hover.
-  video.controls = true;
+  // On mouse/trackpad devices, enable native controls only while the pointer is over the player.
+  // Touch devices keep controls available because they have no hover state.
+  const hoverControls = matchMedia('(hover: hover) and (pointer: fine)').matches;
+  video.controls = !hoverControls || box.matches(':hover');
+  box.addEventListener('pointerenter', e => {
+    if (hoverControls && e.pointerType !== 'touch') video.controls = true;
+  });
+  box.addEventListener('pointerleave', e => {
+    if (hoverControls && e.pointerType !== 'touch') video.controls = false;
+  });
+  box.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch') video.controls = true;
+  });
   const btnBack = $('btn-back'), btnFwd = $('btn-fwd'), btnFav = $('btn-fav');
   const btnRecord = $('btn-record');
 
@@ -2633,6 +2688,99 @@ body[data-theme="nordic"] {
     updateNav();
   };
 
+  let pendingBackup = null;
+  const bytesToBase64 = bytes => {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(binary);
+  };
+  const base64ToBytes = value => {
+    const binary = atob(value), bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  };
+  $('btn-backup-export').onclick = async () => {
+    const button = $('btn-backup-export');
+    button.disabled = true; plMsg('Preparing configuration backup…');
+    try {
+      const localPlaylists = {}, localEpg = {};
+      for (const p of playlists) {
+        if (p.type === 'file') {
+          const cached = await idbGet('pl2:' + p.id);
+          if (!cached || !cached.raw) throw new Error('The saved data for local playlist “' + p.name + '” is missing.');
+          localPlaylists[p.id] = cached;
+        }
+        if (p.epgFileName) {
+          const saved = await idbGet('epg:' + p.id);
+          if (!saved || !saved.blob) throw new Error('The local EPG file for “' + p.name + '” is missing.');
+          const bytes = new Uint8Array(await saved.blob.arrayBuffer());
+          localEpg[p.id] = { name: saved.name || p.epgFileName, type: saved.blob.type || 'application/octet-stream', data: bytesToBase64(bytes) };
+        }
+      }
+      const backup = {
+        format: 'iptv-studio-pro-backup', version: 1, createdAt: new Date().toISOString(),
+        data: {
+          settings: store.get('settings', {}), playlists, favorites: store.get('favs', []),
+          recent: store.get('recent', []), dead: store.get('dead', {}), view: store.get('view', 'country'),
+          localPlaylists, localEpg
+        }
+      };
+      const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
+      const a = h('a', { href: URL.createObjectURL(blob), download: 'iptv-studio-backup-' + new Date().toISOString().slice(0, 10) + '.json' });
+      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      plMsg('Configuration backup saved. Keep the JSON file somewhere safe.');
+    } catch (err) { plMsg('Backup failed: ' + err.message); }
+    finally { button.disabled = false; }
+  };
+  $('backup-file').onchange = async e => {
+    const file = e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    try {
+      if (file.size > 200 * 1024 * 1024) throw new Error('The backup is larger than 200 MB.');
+      const backup = JSON.parse(await file.text()), d = backup && backup.data;
+      if (backup.format !== 'iptv-studio-pro-backup' || backup.version !== 1 || !d || !Array.isArray(d.playlists) || !d.settings || typeof d.settings !== 'object') throw new Error('This is not a supported IPTV Studio backup.');
+      for (const p of d.playlists) if (!p || typeof p.id !== 'string' || typeof p.name !== 'string' || !['url', 'file'].includes(p.type)) throw new Error('The backup contains an invalid playlist entry.');
+      if (d.favorites != null && !Array.isArray(d.favorites)) throw new Error('The backup favorites are invalid.');
+      pendingBackup = backup;
+      const localCount = Object.keys(d.localPlaylists || {}).length;
+      const epgCount = Object.keys(d.localEpg || {}).length;
+      $('backup-preview-text').textContent = 'Backup from ' + (backup.createdAt || 'an unknown date') + ' · ' + d.playlists.length + ' playlists · ' + (d.favorites || []).length + ' favorites' + (localCount ? ' · ' + localCount + ' local playlist file(s)' : '') + (epgCount ? ' · ' + epgCount + ' local EPG file(s)' : '') + '. Applying it replaces the current settings, playlists, favorites, and recent list.';
+      $('backup-preview').hidden = false;
+      plMsg('Review the backup details below before applying it.');
+    } catch (err) { pendingBackup = null; $('backup-preview').hidden = true; plMsg('Could not read backup: ' + err.message); }
+  };
+  $('btn-backup-cancel').onclick = () => { pendingBackup = null; $('backup-preview').hidden = true; };
+  $('btn-backup-apply').onclick = async () => {
+    if (!pendingBackup) return;
+    const button = $('btn-backup-apply'), d = pendingBackup.data;
+    button.disabled = true; $('btn-backup-cancel').disabled = true; plMsg('Restoring backup…');
+    try {
+      const allowedViews = ['fav', 'recent', 'country', 'category', 'all'];
+      localStorage.setItem('iptv.settings', JSON.stringify(d.settings));
+      localStorage.setItem('iptv.playlists', JSON.stringify(d.playlists));
+      localStorage.setItem('iptv.favs', JSON.stringify(d.favorites || []));
+      localStorage.setItem('iptv.recent', JSON.stringify(d.recent || []));
+      localStorage.setItem('iptv.dead', JSON.stringify(d.dead || {}));
+      localStorage.setItem('iptv.view', JSON.stringify(allowedViews.includes(d.view) ? d.view : 'country'));
+      for (const p of playlists) { await idbDel('pl2:' + p.id); await idbDel('epg:' + p.id); }
+      for (const [id, cached] of Object.entries(d.localPlaylists || {})) {
+        if (!d.playlists.some(p => p.id === id && p.type === 'file') || !cached || !Array.isArray(cached.raw)) continue;
+        await idbSet('pl2:' + id, cached);
+      }
+      for (const [id, item] of Object.entries(d.localEpg || {})) {
+        if (!d.playlists.some(p => p.id === id) || !item || typeof item.data !== 'string') continue;
+        const blob = new Blob([base64ToBytes(item.data)], { type: item.type || 'application/octet-stream' });
+        await idbSet('epg:' + id, { blob, name: item.name || 'guide.xml' });
+      }
+      pendingBackup = null;
+      plMsg('Backup restored. Reloading…');
+      location.reload();
+    } catch (err) {
+      button.disabled = false; $('btn-backup-cancel').disabled = false;
+      plMsg('Restore failed: ' + err.message);
+    }
+  };
+
   $('btn-export').onclick = () => {
     if (!favs.length) return plMsg('No favorites to export.');
     const q = s => String(s || '').replace(/"/g, "'");
@@ -2659,6 +2807,20 @@ body[data-theme="nordic"] {
     renderPlaylists();
     dlg.showModal();
   };
+  const sidebarButton = $('btn-sidebar');
+  function applySidebarVisibility() {
+    const hidden = !!settings.channelPanelHidden;
+    document.body.classList.toggle('sidebar-hidden', hidden);
+    sidebarButton.textContent = hidden ? 'Show list' : 'Hide list';
+    sidebarButton.setAttribute('aria-expanded', String(!hidden));
+    sidebarButton.title = hidden ? 'Show channel list' : 'Hide channel list';
+  }
+  sidebarButton.onclick = () => {
+    settings.channelPanelHidden = !settings.channelPanelHidden;
+    saveSettings();
+    applySidebarVisibility();
+    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+  };
   $('dlg-close').onclick = () => dlg.close();
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
 
@@ -2669,6 +2831,7 @@ body[data-theme="nordic"] {
   applyTheme();
   applyFont();
   applyFsMode();
+  applySidebarVisibility();
   video.volume = store.get('vol', 1);
   video.muted = store.get('muted', false);
   syncTabs();

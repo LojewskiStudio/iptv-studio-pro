@@ -1,29 +1,33 @@
 <!DOCTYPE html>
 <!--
   IPTV Studio Player Pro (ver. 01)
-Single-file HLS/IPTV player. Open it in a browser tab; no server required.
-- Multiple M3U/M3U8 playlists from URLs or local files, cached in IndexedDB
-- Configurable country and category extraction for each playlist
-- Favorites, recent channels, playback history (Back/Forward), and zapping
-- Automatic fallback to another stream for the same channel (same tvg-id)
-- Video quality, audio track, and subtitle selection
-- Stream statistics
-- Basic EPG (Now/Next)
-- DVR recording
-- Keyboard navigation: arrow keys move through the channel list; Enter plays the selected channel
+  Single-file HLS/IPTV player. Open it in a browser tab; no server required.
+  - Multiple M3U/M3U8 playlists from URLs or local files, cached in IndexedDB
+  - Configurable country and category extraction for each playlist
+  - Favorites, recent channels, playback history (Back/Forward), and zapping
+  - Automatic fallback to another stream for the same channel (same tvg-id)
+  - Video quality, audio track, and subtitle selection
+  - Stream statistics
+  - Basic EPG (Now/Next)
+  - DVR recording
+  - Keyboard navigation: arrow keys move through the channel list; Enter plays the selected channel
 
   IPTV Studio Pro
       Mihai Lucian Lojewski (nov. 2026)
       Copyright (c) 2026 Lojewski Studio
       SPDX-License-Identifier: MIT
 
-  *Requires hls.js (loaded from a CDN) for browsers without native HLS.   
+  *Requires hls.js (loaded from a CDN) for browsers without native HLS.
   Licensed under the MIT License. See the LICENSE file in the repository root.
 
   Performance pass (nov. 2026): EPG indexed once in a Web Worker (no per-zap XML scans),
   logo-backdrop results persisted in IndexedDB and probed through a small queue, cached list
   grouping, O(1) row lookup and cursor movement, lighter REC timecode and REC glow,
   content-visibility on channel rows, hls.js buffer cap, non-blocking hls.js load.
+
+  Layout pass (nov. 2026): the player keeps the same vertical position whether the channel list
+  is visible or hidden; in browser fullscreen (F11) it is centered vertically; on phones the page
+  never scrolls (the player stays fixed on top and only the channel list scrolls).
 -->
 <html lang="en">
 <head>
@@ -81,14 +85,17 @@ body {
 ::selection { background:color-mix(in srgb, var(--accent) 45%, #000); color:#fff; }
 
 /* ---------- Player column ---------- */
+/* The player is always aligned to the top of this column, so its vertical position
+   is identical whether the channel list is visible or hidden. */
 .left {
   position:relative; flex:1; min-width:0; display:flex; align-items:flex-start; justify-content:center; padding:14px; overflow-y:auto;
   background:radial-gradient(ellipse at 50% 26%, var(--glow, var(--bg)) 0, var(--bg) 68%);
 }
 .player { position:relative; margin:20px auto 0; width:100%; max-width:1200px; }
 .sidebar-hidden .right { display:none; }
-.sidebar-hidden .left { align-items:safe center; }
-.sidebar-hidden .player { margin-top:0; }
+/* Browser fullscreen (F11): center the player vertically.
+   The "page-fs" class is set on <html> by the script in the Start section. */
+html.page-fs .player { margin:auto; }
 .video-box { position:relative; background:#000; }
 video {
   display:block; width:100%; aspect-ratio:16/9; max-height:calc(100vh - 200px);
@@ -293,15 +300,22 @@ pre.inspect {
 kbd { padding:1px 7px; font:12px ui-monospace,Consolas,monospace; cursor:default; }
 
 /* ---------- Responsive ---------- */
+/* Phones (portrait): the page itself never scrolls. The player stays fixed on top
+   and only the channel list scrolls inside its own panel. */
 @media (max-width:800px) {
-  body { flex-direction:column; height:auto; overflow:auto; }
-  .left { padding:10px; overflow:visible; }
-  .player { margin:20px auto 0; }
-  .sidebar-hidden .left { min-height:100vh; }
-  .sidebar-hidden .player { margin-top:0; }
+  html, body { overscroll-behavior:none; }           /* no rubber-band / pull-to-refresh moving the page */
+  body {
+    flex-direction:column;
+    height:100vh; height:100dvh;                     /* dvh = real visible height on iOS/Android browser bars */
+    overflow:hidden;
+  }
+  .left { flex:0 0 auto; padding:10px; overflow:visible; }
+  .player { margin:0 auto; }
+  .sidebar-hidden .player { margin-top:20px; }
   .stats { position:static; max-height:min(30vh,180px); box-shadow:none; }
   video { max-height:none; }
-  .right { width:100%; height:75vh; border-left:0; }
+  .right { flex:1 1 0; width:100%; height:auto; min-height:0; border-left:0; }   /* the list takes the remaining height */
+  #channel-list { overscroll-behavior:contain; }     /* list scrolling never drags the page */
   .mrow { grid-template-columns:1fr; }
   .mrow small { grid-column:1; }
 }
@@ -454,7 +468,7 @@ body[data-theme="nordic"] {
       <div class="info-side">
         <span class="status" id="status"></span>
         <span class="epg-line" id="epg-line" aria-live="polite" hidden></span>
-      <span class="record-timecode" id="record-timecode">REC: 00:00:00:00</span>
+        <span class="record-timecode" id="record-timecode">REC: 00:00:00:00</span>
       </div>
     </div>
 
@@ -2253,6 +2267,17 @@ body[data-theme="nordic"] {
     if (video.requestFullscreen) video.requestFullscreen().catch(() => {});
   }
   document.addEventListener('fullscreenchange', () => { updateOverlay(); if (inAppFs() && cur) flashName(); });
+
+  /** Browser fullscreen (F11): the window fills the whole screen. While it does, <html> gets the
+   *  "page-fs" class and the CSS centers the player vertically (see `html.page-fs .player`). */
+  function syncPageFullscreen() {
+    const f11 = matchMedia('(display-mode: fullscreen)').matches ||
+      (innerWidth >= screen.width - 1 && innerHeight >= screen.height - 1);
+    document.documentElement.classList.toggle('page-fs', f11);
+  }
+  addEventListener('resize', syncPageFullscreen);
+  document.addEventListener('fullscreenchange', syncPageFullscreen);
+  syncPageFullscreen();
 
   /* ---------- Toolbar buttons ---------- */
   $('btn-prev').onclick = () => zap(-1);

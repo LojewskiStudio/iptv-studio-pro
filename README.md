@@ -4,7 +4,8 @@ A single-file IPTV player for HLS streams and M3U/M3U8 playlists. It runs in a m
 
 
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/febaa235-b114-4fee-8739-0e07824a2683" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/815d7873-e578-4c3a-8bae-0b39d1026d1d" />
+
 
 
 
